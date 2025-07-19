@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# This script automates running the Omni CLI.
+# It activates the virtual environment, sets up dependencies and environment, and runs the main script.
+
+# --- Get the absolute path of the directory where the script is located ---
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+# --- Define paths ---
+VENV_ACTIVATE="$SCRIPT_DIR/.venv/bin/activate"
+OMNI_SCRIPT="$SCRIPT_DIR/omni.py"
+
+# --- Check if essential files exist ---
+if [ ! -f "$VENV_ACTIVATE" ]; then
+    echo "Error: Virtual environment not found at '$VENV_ACTIVATE'."
+    echo "Creating a new one..."
+    python3.11 -m venv .venv  # Assuming Python 3.11 as per previous discussions
+    source "$VENV_ACTIVATE"
+    pip install --upgrade pip
+else
+    source "$VENV_ACTIVATE"
+fi
+if [ ! -f "$OMNI_SCRIPT" ]; then
+    echo "Error: Main script not found at '$OMNI_SCRIPT'."
+    exit 1
+fi
+
+# --- Run the main Omni Python script ---
+python "$OMNI_SCRIPT" "$@"

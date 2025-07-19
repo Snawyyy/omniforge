@@ -1,0 +1,10 @@
+# Core dependencies
+requests==2.32.3
+rich==13.7.1
+prompt-toolkit==3.0.47
+
+# AST-based code editing
+astor==0.8.1
+
+# Interactive model selection
+simple-term-menu==1.6.4
