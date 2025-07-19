@@ -839,16 +839,14 @@ def handle_commit_command():
     except ValueError as e:
         ui_manager.show_error(str(e))
         return
-    with ui_manager.show_spinner('Checking for changes...'):
-        changed_files = git_manager.get_changed_files()
+    changed_files = git_manager.get_changed_files()
     if not changed_files:
         ui_manager.show_success(
             'No changes to commit. Everything is up to date.')
         return
-    with ui_manager.show_spinner('Analyzing file diffs...'):
-        staged_diff = git_manager.get_diff(staged=True)
-        unstaged_diff = git_manager.get_diff()
-        full_diff = f'{staged_diff}\n{unstaged_diff}'.strip()
+    staged_diff = git_manager.get_diff(staged=True)
+    unstaged_diff = git_manager.get_diff()
+    full_diff = f'{staged_diff}\n{unstaged_diff}'.strip()
     if not full_diff.strip():
         ui_manager.show_success(
             'No content changes detected (e.g., only file mode changes).')
@@ -859,8 +857,7 @@ Respond with ONLY the raw commit message text, without any markdown or extra exp
 
 --- GIT DIFF ---
 {full_diff}"""
-    with ui_manager.show_spinner('AI is generating the commit message...'):
-        commit_message = query_llm(prompt).strip()
+    commit_message = query_llm(prompt).strip()
     if not commit_message:
         ui_manager.show_error(
             'AI failed to generate a commit message. Aborting.')
@@ -876,15 +873,13 @@ Respond with ONLY the raw commit message text, without any markdown or extra exp
     if ui_manager.get_user_input('\nProceed with commit? (y/n): ').lower() in [
         'yes', 'y']:
         try:
-            with ui_manager.show_spinner('Staging files...'):
-                git_manager.add(changed_files)
+            git_manager.add(changed_files)
             ui_manager.show_success('✅ Files staged.')
         except subprocess.CalledProcessError as e:
             ui_manager.show_error(f'Staging failed: {e.stderr}')
             return
         try:
-            with ui_manager.show_spinner('Committing changes...'):
-                git_manager.commit(commit_message)
+            git_manager.commit(commit_message)
             ui_manager.show_success('✅ Commit successful.')
         except subprocess.CalledProcessError as e:
             ui_manager.show_error(f'Commit failed: {e.stderr}')
@@ -892,8 +887,7 @@ Respond with ONLY the raw commit message text, without any markdown or extra exp
         if ui_manager.get_user_input('Push changes to remote? (y/n): ').lower(
             ) in ['yes', 'y']:
             try:
-                with ui_manager.show_spinner('Pushing to remote...'):
-                    git_manager.push()
+                git_manager.push()
                 ui_manager.show_success('✅ Push successful.')
             except subprocess.CalledProcessError as e:
                 ui_manager.show_error(f'Push failed: {e.stderr}')

@@ -63,29 +63,56 @@ class GitManager:
             A string representing the repository's status.
         """
         return self._run_command(['git', 'status', '--porcelain'])
-
-    def get_changed_files(self) ->List[str]:
+        
+    def get_changed_files(self) -> List[str]:
         """
-        Gets a list of all changed (modified, added, deleted, untracked, renamed) files.
+        Gets a list of all changed (modified, added, deleted, untracked, renamed, or copied) files.
 
-        This parses the output of `git status --porcelain`.
+        This parses the output of `git status --porcelain`, which provides a stable,
+        machine-readable format.
 
         Returns:
-            A list of file paths relative to the repository root. For renamed files,
-            it returns the new path.
+            A list of file paths relative to the repository root. For renamed or
+            copied files, it returns the new path.
         """
         status_output = self.get_status()
         if not status_output:
             return []
+        
         changed_files = []
         for line in status_output.splitlines():
-            path_info = line[3:]
-            if line[0] == 'R':
-                _, new_path = path_info.split(' -> ')
-                changed_files.append(new_path)
+            if len(line) < 3:  # Skip malformed lines
+                continue
+                
+            # Git status porcelain format: XY filename
+            # X = index status, Y = working tree status
+            index_status = line[0]
+            worktree_status = line[1]
+            
+            # The filename starts after the two status characters and a space
+            # But let's be more defensive about finding where the filename actually starts
+            filename_start = 2
+            while filename_start < len(line) and line[filename_start] == ' ':
+                filename_start += 1
+                
+            if filename_start >= len(line):
+                continue  # Skip if no filename found
+                
+            path_info = line[filename_start:]
+            
+            # Check if either index or working tree status indicates rename/copy
+            if index_status in ('R', 'C') or worktree_status in ('R', 'C'):
+                if ' -> ' in path_info:
+                    _, new_path = path_info.split(' -> ', 1)  # Use maxsplit=1 for safety
+                    changed_files.append(new_path.strip())
+                else:
+                    # Fallback if format is unexpected
+                    changed_files.append(path_info.strip())
             else:
-                changed_files.append(path_info)
-        return changed_files
+                changed_files.append(path_info.strip())
+        
+        # Remove duplicates while preserving order
+        return list(dict.fromkeys(changed_files))
 
     def get_diff(self, file_path: Optional[str]=None, staged: bool=False
         ) ->str:
