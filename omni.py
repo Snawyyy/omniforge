@@ -279,47 +279,46 @@ def generate_project_manifest(path: str) ->tuple[str, List[str]]:
 
 def look_command(path: str) ->None:
     """
-    Scans a directory or file and loads it into memory.
+    Scans a directory or file and loads it into memory. It can resolve paths
+    relative to the current working directory or the project root in memory.
     If a new directory is scanned, the previous 'look' context is cleared
     to ensure the context remains relevant.
     """
-    if not os.path.exists(path):
+    resolved_path = resolve_file_path(path)
+    if not resolved_path:
         ui_manager.show_error(f'❌ Path not found: {path}')
         return
-    if os.path.isdir(path):
+    if resolved_path != os.path.abspath(path):
+        ui_manager.show_success(
+            f"Found '{path}' in project. Using: {resolved_path}")
+    if os.path.isdir(resolved_path):
         ui_manager.show_success(
             "New project directory detected. Clearing previous 'look' context."
             )
         memory_manager.memory['look'] = []
         with ui_manager.show_spinner('Generating project manifest...'):
-            manifest = generate_project_manifest(path)
-        memory_manager.add_look_data(path, manifest)
+            manifest = generate_project_manifest(resolved_path)
+        memory_manager.add_look_data(resolved_path, manifest)
         ui_manager.show_success('✅ Project manifest added to memory.')
     else:
         try:
             with ui_manager.show_spinner('Loading file...'):
-                with open(path, 'r', encoding='utf-8') as f:
+                with open(resolved_path, 'r', encoding='utf-8') as f:
                     content = f.read().strip()
             for item in memory_manager.memory['look']:
-                if item.get('file') == path:
+                if item.get('file') == resolved_path:
                     item['content'] = content
                     memory_manager.save_memory()
                     ui_manager.show_success(
                         '✅ Refreshed file content in memory.')
                     return
-            memory_manager.add_look_data(path, content)
+            memory_manager.add_look_data(resolved_path, content)
             ui_manager.show_success('✅ File content added to memory.')
         except Exception as e:
             ui_manager.show_error(f'❌ Error reading file: {e}')
 
 
-def get_project_root(self) ->Optional[str]:
-    """Find the first directory path in the 'look' memory."""
-    for item in self.memory.get('look', []):
-        path = item['file']
-        if os.path.isdir(path):
-            return path
-    return None
+# This function is defined in the MemoryManager class, not here
 
 
 def resolve_file_path(path: str) ->Optional[str]:
@@ -334,16 +333,24 @@ def resolve_file_path(path: str) ->Optional[str]:
     return None
 
 
-def resolve_file_path(path: str) ->Optional[str]:
-    """Resolves a file path, checking CWD first, then against project root in memory."""
-    if os.path.exists(path):
-        return os.path.abspath(path)
-    project_root = memory_manager.get_project_root()
-    if project_root:
-        full_path = os.path.join(project_root, path)
-        if os.path.exists(full_path):
-            return full_path
-    return None
+def _create_prompt_for_file_creation(file_name: str, instruction: str) -> str:
+    """
+    Generate a robust prompt for file creation that instructs the AI to act as an expert,
+    produce complete and clean code, and avoid any extra commentary.
+    """
+    return f"""You are an expert programmer tasked with creating a new file. Your goal is to generate complete, production-ready content based on the user's instruction.
+
+IMPORTANT RULES:
+- Provide ONLY the raw file content - no explanations, notes, or commentary outside the file itself
+- Include all necessary imports, boilerplate, and complete implementations
+- If creating code, ensure it's syntactically correct and follows best practices
+- For configuration files, use appropriate formatting (JSON, YAML, etc.)
+- For documentation files, use proper markdown formatting
+
+File to create: {file_name}
+User instruction: {instruction}
+
+Generate the complete file content now:"""
 
 
 def handle_file_create_command(file_path: str, instruction: str):
@@ -357,8 +364,7 @@ def handle_file_create_command(file_path: str, instruction: str):
             ) not in ['yes', 'y']:
             ui_manager.show_error('File creation cancelled.')
             return
-    prompt = f"""Create the full content for a new file named '{os.path.basename(file_path)}' based on this instruction: '{instruction}'.
-Provide only the complete, raw content for the file. If it's a code file, include all necessary boilerplate, imports, and functions. Do NOT add any explanations or notes outside of the file's content itself."""
+    prompt = _create_prompt_for_file_creation(os.path.basename(file_path), instruction)
     with ui_manager.show_spinner(
         f"AI is generating content for '{file_path}'..."):
         response = query_llm(prompt)
@@ -478,10 +484,130 @@ def _load_all_project_files_if_needed():
             )
 
 
+def _create_prompt_for_element_selection(file_name: str, instruction: str, elements: List[str], element_structures: Dict[str, Dict]) -> str:
+    """
+    Create a helper for the first stage of the 'edit' command. This prompt asks the AI
+    to analyze the user's instruction and intelligently select the most relevant code element to modify.
+    """
+    # Build element details for better context
+    element_details = []
+    for elem in elements:
+        if elem in element_structures:
+            struct = element_structures[elem]
+            detail = f"{elem} ({struct['type']}, lines {struct['line_start']}-{struct['line_end']})"
+            element_details.append(detail)
+        else:
+            element_details.append(elem)
+    
+    return f"""You are an expert code analyzer. Your task is to identify what should be modified based on the user's instruction.
+
+File: {file_name}
+Available elements: {', '.join(element_details) if element_details else 'None'}
+
+User instruction: {instruction}
+
+RESPONSE FORMAT:
+Choose one of these response types:
+1. "ELEMENT: <element_name>" - to edit an entire function/class
+2. "PARTIAL: <element_name> LINES: <start>-<end>" - to edit specific lines within an element
+3. "FILE" - to edit the entire file or multiple elements
+
+RULES:
+- If the instruction mentions specific line numbers or a specific part of a function, use PARTIAL
+- If the instruction targets an entire function/class, use ELEMENT
+- If the instruction requires changes to multiple elements or file structure, use FILE
+- For PARTIAL edits, provide absolute line numbers from the original file
+
+What should be edited?"""
+
+
+def _create_prompt_for_element_rewrite(file_name: str, element_name: str, instruction: str, original_code: str, is_full_file: bool = False) -> str:
+    """
+    Create a helper for the second stage of the 'edit' command. This prompt instructs the AI
+    to rewrite a specific code element (or the whole file) based on the user's request,
+    demanding a complete and syntactically correct code block as output.
+    """
+    if is_full_file:
+        return f"""You are an expert programmer. Rewrite the entire file to accomplish the user's task.
+
+IMPORTANT RULES:
+- Provide ONLY the complete, updated code for the entire file
+- Ensure all syntax is correct and the code is ready to run
+- Preserve existing functionality unless explicitly asked to change it
+- Include all necessary imports and maintain the file's structure
+- Do NOT include any explanations or comments outside the code
+
+File: {file_name}
+Task: {instruction}
+
+Current file content:
+```python
+{original_code}
+```
+
+Generate the complete updated file now:"""
+    else:
+        return f"""You are an expert programmer. Rewrite the specified element to accomplish the user's task.
+
+IMPORTANT RULES:
+- Provide ONLY the complete, updated code for the element
+- Include any necessary imports at the top of your code block
+- Ensure the code is syntactically correct and maintains the same interface
+- Do NOT include explanations or comments outside the code block
+- The code must be a drop-in replacement for the original element
+
+File: {file_name}
+Element to modify: {element_name}
+Task: {instruction}
+
+Current element code:
+```python
+{original_code}
+```
+
+Generate the complete updated element now:"""
+
+
+def _create_prompt_for_partial_edit(file_name: str, element_name: str, instruction: str, 
+                                   original_snippet: str, line_start: int, line_end: int,
+                                   full_element_code: str) -> str:
+    """
+    Create a prompt for partial edits within a function or class.
+    This allows surgical changes to specific parts of code.
+    """
+    return f"""You are an expert programmer. Make a surgical edit to a specific part of a function/class.
+
+CONTEXT:
+- File: {file_name}
+- Element: {element_name}
+- Lines to modify: {line_start}-{line_end}
+- Task: {instruction}
+
+IMPORTANT RULES:
+- Provide ONLY the code that will replace lines {line_start}-{line_end}
+- Your code must fit seamlessly into the existing function
+- Maintain proper indentation (the code will be auto-indented)
+- Do NOT include the function definition or other parts
+- Do NOT include explanations outside the code
+
+Full element for context:
+```python
+{full_element_code}
+```
+
+Code section to replace (lines {line_start}-{line_end}):
+```python
+{original_snippet}
+```
+
+Generate ONLY the replacement code for the specified lines:"""
+
+
 def handle_file_edit_command(file_path: str, instruction: str):
     """
     Handles the entire workflow for editing a single file, ensuring full
     project context is loaded before the AI makes any decisions.
+    Now supports partial edits within functions.
     """
     global last_code
     _load_all_project_files_if_needed()
@@ -497,58 +623,156 @@ def handle_file_edit_command(file_path: str, instruction: str):
     except (ValueError, FileNotFoundError) as e:
         ui_manager.show_error(str(e))
         return
+    
     elements = editor.list_elements()
-    prompt1 = f"""User wants to edit '{os.path.basename(resolved_path)}' with instruction: '{instruction}'.
-Available elements: {', '.join(elements) if elements else 'None'}.
-Which element should be edited? If a simple change is needed that doesn't fit one element, respond with 'FILE'. Respond with only the name."""
+    # Get detailed structure for each element
+    element_structures = {}
+    for elem in elements:
+        struct = editor.get_element_structure(elem)
+        if struct:
+            element_structures[elem] = struct
+    
+    prompt1 = _create_prompt_for_element_selection(
+        os.path.basename(resolved_path), instruction, elements, element_structures
+    )
     with ui_manager.show_spinner('AI is analyzing file...'):
-        element_to_edit = query_llm(prompt1).strip().splitlines()[0]
-    if element_to_edit not in elements and element_to_edit.upper() != 'FILE':
-        ui_manager.show_error(
-            f"AI identified '{element_to_edit}', which is not a valid element. Aborting."
-            )
-        return
-    if element_to_edit.upper() == 'FILE':
+        ai_response = query_llm(prompt1).strip()
+    
+    # Parse AI response
+    if ai_response.upper() == 'FILE':
+        # Full file edit
         ui_manager.show_success('AI has chosen to edit the entire file.')
         original_snippet = editor.source_code
-        prompt2 = f"""Rewrite the entire file `{os.path.basename(resolved_path)}` to perform this task: '{instruction}'.
-
-Original Code:
-```python
-{original_snippet}```
-
-Provide only the complete, updated code block for the entire file."""
-    else:
-        ui_manager.show_success(f"AI selected '{element_to_edit}' for editing."
+        prompt2 = _create_prompt_for_element_rewrite(
+            os.path.basename(resolved_path), 
+            'entire file', 
+            instruction, 
+            original_snippet, 
+            is_full_file=True
+        )
+        edit_type = 'FILE'
+        element_to_edit = None
+        line_range = None
+    elif ai_response.startswith('PARTIAL:'):
+        # Partial edit within an element
+        parts = ai_response.split()
+        element_to_edit = parts[1]
+        if 'LINES:' in ai_response:
+            line_part = ai_response.split('LINES:')[1].strip()
+            if '-' in line_part:
+                line_start, line_end = map(int, line_part.split('-'))
+                line_range = (line_start, line_end)
+            else:
+                ui_manager.show_error('Invalid line range format')
+                return
+        else:
+            ui_manager.show_error('Missing line range for partial edit')
+            return
+            
+        if element_to_edit not in elements:
+            ui_manager.show_error(f"Element '{element_to_edit}' not found")
+            return
+            
+        ui_manager.show_success(
+            f"AI selected partial edit of '{element_to_edit}' (lines {line_start}-{line_end})"
+        )
+        
+        # Get the snippet for the specific lines
+        original_snippet = editor.get_element_body_snippet(
+            element_to_edit, line_start, line_end
+        )
+        if not original_snippet:
+            # Fallback: get full element if snippet extraction fails
+            original_snippet = editor.get_source_of(element_to_edit)
+            
+        full_element_code = editor.get_source_of(element_to_edit)
+        prompt2 = _create_prompt_for_partial_edit(
+            os.path.basename(resolved_path),
+            element_to_edit,
+            instruction,
+            original_snippet,
+            line_start,
+            line_end,
+            full_element_code
+        )
+        edit_type = 'PARTIAL'
+    elif ai_response.startswith('ELEMENT:'):
+        # Full element edit
+        element_to_edit = ai_response.split(':', 1)[1].strip()
+        if element_to_edit not in elements:
+            ui_manager.show_error(
+                f"AI identified '{element_to_edit}', which is not a valid element. Aborting."
             )
+            return
+        ui_manager.show_success(f"AI selected '{element_to_edit}' for editing.")
         original_snippet = editor.get_source_of(element_to_edit)
-        prompt2 = f"""Rewrite the element `{element_to_edit}` from `{os.path.basename(resolved_path)}` for this task: '{instruction}'.
-
-Original Code:
-```python
-{original_snippet}```
-
-Provide only the complete, updated code block. You may include necessary import statements at the top of the code block."""
-    with ui_manager.show_spinner(f"AI is editing '{element_to_edit}'..."):
+        prompt2 = _create_prompt_for_element_rewrite(
+            os.path.basename(resolved_path), 
+            element_to_edit, 
+            instruction, 
+            original_snippet
+        )
+        edit_type = 'ELEMENT'
+        line_range = None
+    else:
+        # Legacy format - assume it's an element name
+        element_to_edit = ai_response.splitlines()[0]
+        if element_to_edit not in elements:
+            ui_manager.show_error(
+                f"AI identified '{element_to_edit}', which is not a valid element. Aborting."
+            )
+            return
+        ui_manager.show_success(f"AI selected '{element_to_edit}' for editing.")
+        original_snippet = editor.get_source_of(element_to_edit)
+        prompt2 = _create_prompt_for_element_rewrite(
+            os.path.basename(resolved_path), 
+            element_to_edit, 
+            instruction, 
+            original_snippet
+        )
+        edit_type = 'ELEMENT'
+        line_range = None
+    
+    with ui_manager.show_spinner(f"AI is editing..."):
         response = query_llm(prompt2)
+    
     code_blocks = extract_code(response)
     if not code_blocks:
         ui_manager.show_error('AI did not return a valid code block.')
         print(Panel(response, title="[yellow]AI's Raw Response[/]"))
         return
     new_code = code_blocks[0][1]
-    if element_to_edit.upper() == 'FILE':
+    
+    # Apply the edit based on type
+    success = False
+    if edit_type == 'FILE':
         try:
             editor.tree = ast.parse(new_code)
+            success = True
         except SyntaxError as e:
             ui_manager.show_error(f'AI returned invalid Python syntax: {e}')
             print(Panel(response, title="[yellow]AI's Raw Response[/]"))
             return
-    elif not editor.replace_element(element_to_edit, new_code):
-        ui_manager.show_error(
-            'AI returned invalid code; could not be parsed or applied.')
-        print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-        return
+    elif edit_type == 'PARTIAL':
+        # Use the new partial replacement method
+        success = editor.replace_partial(
+            element_to_edit, 
+            new_code, 
+            line_start=line_range[0], 
+            line_end=line_range[1]
+        )
+        if not success:
+            ui_manager.show_error('Failed to apply partial edit.')
+            print(Panel(response, title="[yellow]AI's Raw Response[/]"))
+            return
+    else:  # ELEMENT
+        success = editor.replace_element(element_to_edit, new_code)
+        if not success:
+            ui_manager.show_error(
+                'AI returned invalid code; could not be parsed or applied.')
+            print(Panel(response, title="[yellow]AI's Raw Response[/]"))
+            return
+    
     if not (diff := editor.get_diff()):
         ui_manager.show_success('AI made no changes.')
         return
@@ -561,6 +785,56 @@ Provide only the complete, updated code block. You may include necessary import 
         ui_manager.show_success(f'Changes saved to {resolved_path}.')
     else:
         ui_manager.show_error('Changes discarded.')
+
+
+def _create_prompt_for_refactor_plan(instruction: str, memory_context: str) -> str:
+    """
+    Create a specialized prompt-generation function for the 'refactor' command.
+    This prompt will explicitly define the required JSON structure for the plan
+    and instruct the AI to act as an expert project manager.
+    """
+    return f"""You are an expert project manager and software architect. Analyze the project context and create a detailed refactoring plan.
+
+Your plan must be a valid JSON object with this exact structure:
+{{
+    "actions": [
+        {{
+            "type": "MODIFY" | "CREATE" | "DELETE" | "PARTIAL",
+            "file": "relative/path/to/file.py",
+            "element": "function_or_class_name",  // For MODIFY/DELETE/PARTIAL
+            "element_name": "new_element_name",    // For CREATE
+            "line_start": 10,                      // For PARTIAL only
+            "line_end": 20,                        // For PARTIAL only
+            "reason": "Clear explanation of why this change is needed",
+            "description": "What this action will accomplish",
+            "anchor_element": "optional_anchor",   // Optional for CREATE
+            "position": "before" | "after"         // Optional for CREATE
+        }}
+    ]
+}}
+
+ACTION TYPES:
+- MODIFY: Change an entire function, class, or method
+- PARTIAL: Change specific lines within a function/class (requires line_start and line_end)
+- CREATE: Add new functions, classes, or files
+- DELETE: Remove functions, classes, variables, or imports
+
+RULES FOR YOUR PLAN:
+- Use PARTIAL when you only need to change a small part of a function
+- Use MODIFY when restructuring an entire function or class
+- Each action must have all required fields based on its type
+- File paths must be relative to the project root
+- Be specific and surgical - avoid unnecessary changes
+- Consider dependencies between changes
+- Order actions logically (e.g., create dependencies before using them)
+
+### Project Context ###
+{memory_context}
+
+### Refactoring Request ###
+{instruction}
+
+Generate ONLY the JSON plan - no explanations or markdown:"""
 
 
 def _get_refactor_plan(instruction: str) ->Optional[List[Dict]]:
@@ -582,16 +856,8 @@ def _get_refactor_plan(instruction: str) ->Optional[List[Dict]]:
         ui_manager.show_error(
             "No project context in memory. Use 'look <directory>' first.")
         return None
-    plan_prompt = f"""You are an expert project manager AI. Based on the project context and user request, create a JSON plan of actions. The structure must be `{{"actions": [...]}}`. Actions can be 'MODIFY' or 'CREATE'.
-For 'CREATE' actions in Python files, you can optionally specify an `"anchor_element"` and a `"position": "before"` or `"after"` to control placement. Otherwise, new functions will be placed intelligently before the main execution block.
-
-### Project Context ###
-{memory_manager.get_memory_context()}
-
-### User Request ###
-'{instruction}'
-
-Respond with ONLY the JSON plan."""
+    memory_context = memory_manager.get_memory_context()
+    plan_prompt = _create_prompt_for_refactor_plan(instruction, memory_context)
     with ui_manager.show_spinner('AI is creating an execution plan...'):
         plan_str = query_llm(plan_prompt)
     try:
@@ -630,10 +896,21 @@ def _display_and_confirm_plan(plan: Dict) ->bool:
         return False
     ui_manager.show_success('AI has created a plan:')
     for i, action in enumerate(actions):
+        action_type = action.get('type', 'N/A')
         element = action.get('element') or action.get('element_name', 'N/A')
         reason = action.get('reason') or action.get('description', '')
-        print(
-            f"  [cyan]{i + 1}. {action.get('type', 'N/A')}:[/] {action.get('file', '')}/{element} - {reason}"
+        file_path = action.get('file', '')
+        
+        # Format based on action type
+        if action_type == 'PARTIAL':
+            line_start = action.get('line_start', '?')
+            line_end = action.get('line_end', '?')
+            print(
+                f"  [cyan]{i + 1}. {action_type}:[/] {file_path}/{element} (lines {line_start}-{line_end}) - {reason}"
+            )
+        else:
+            print(
+                f"  [cyan]{i + 1}. {action_type}:[/] {file_path}/{element} - {reason}"
             )
     if ui_manager.get_user_input('\nProceed with this plan? (y/n): ').lower(
         ) in ['yes', 'y']:
@@ -676,19 +953,71 @@ def _apply_refactor_changes(editors: Dict[str, CodeEditor]) ->None:
         ui_manager.show_error('Changes discarded.')
 
 
+def _create_prompt_for_refactor_action(action_type: str, file_path: str, action_details: Dict) -> str:
+    """
+    Create a helper to generate prompts for individual 'CREATE' or 'MODIFY' steps
+    within a refactor plan. This ensures the AI produces code for the specific
+    sub-task in the correct context.
+    """
+    if action_type == 'MODIFY':
+        element_name = action_details['element_name']
+        reason = action_details['reason']
+        original_code = action_details['original_code']
+        return f"""You are implementing a specific refactoring task as part of a larger plan.
+
+REFACTORING CONTEXT:
+- File: {file_path}
+- Element: {element_name}
+- Reason for change: {reason}
+
+RULES:
+- Provide ONLY the complete updated code for the element
+- Include any necessary imports at the top
+- Ensure the code integrates properly with the rest of the file
+- Maintain the same function/class signature unless the change requires otherwise
+- No explanations outside the code block
+
+Current element code:
+```python
+{original_code}
+```
+
+Generate the updated element code:"""
+    
+    elif action_type == 'CREATE':
+        element_name = action_details['element_name']
+        description = action_details['description']
+        return f"""You are implementing a specific refactoring task as part of a larger plan.
+
+REFACTORING CONTEXT:
+- File: {file_path}
+- New element to create: {element_name}
+- Purpose: {description}
+
+RULES:
+- Provide ONLY the complete code for the new element
+- Include all necessary imports at the top
+- Follow the coding style and patterns used in the project
+- Ensure the code is production-ready and well-structured
+- For non-Python files, provide the complete file content
+- No explanations outside the code block
+
+Generate the new element code:"""
+
+
 def _process_refactor_action(action: Dict, project_base_path: str, editors:
-    Dict[str, CodeEditor]) ->bool:
+    Dict) ->bool:
     """
     Processes a single refactoring action from the plan.
-    
+
     This function handles the execution of a single action from the refactoring plan,
     including LLM code generation and applying changes to in-memory editors or files.
-    
+
     Args:
         action: A dictionary containing action details (type, file, element, etc.)
         project_base_path: The absolute path to the project root
         editors: Dictionary mapping file paths to their CodeEditor instances
-        
+
     Returns:
         True if the action was processed successfully, False otherwise
     """
@@ -700,39 +1029,89 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
     file_path_absolute = os.path.join(project_base_path, file_path_relative)
     action_type = action.get('type', '').upper()
     prompt, element_name = '', ''
+    
     if action_type == 'MODIFY':
         element_name = action.get('element')
         reason = action.get('reason')
-        if file_path_absolute not in editors:
-            try:
-                editors[file_path_absolute] = CodeEditor(file_path_absolute)
-            except Exception as e:
+        if file_path_relative.endswith('.py'):
+            if file_path_absolute not in editors:
+                try:
+                    editors[file_path_absolute] = CodeEditor(file_path_absolute
+                        )
+                except Exception as e:
+                    ui_manager.show_error(
+                        f'Error loading file {file_path_absolute}: {e}')
+                    return False
+            editor = editors[file_path_absolute]
+            original_snippet = editor.get_source_of(element_name)
+            if not original_snippet:
                 ui_manager.show_error(
-                    f'Error loading file {file_path_absolute}: {e}')
+                    f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
+                    )
                 return False
-        original_snippet = editors[file_path_absolute].get_source_of(
-            element_name)
-        if not original_snippet:
+            action_details = {
+                'element_name': element_name,
+                'reason': reason,
+                'original_code': original_snippet
+            }
+            prompt = _create_prompt_for_refactor_action('MODIFY', file_path_relative, action_details)
+    elif action_type == 'PARTIAL':
+        element_name = action.get('element')
+        reason = action.get('reason')
+        line_start = action.get('line_start')
+        line_end = action.get('line_end')
+        
+        if not all([element_name, line_start, line_end]):
             ui_manager.show_error(
-                f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
-                )
+                f"PARTIAL action missing required fields. Skipping: {action}")
             return False
-        prompt = f"""Plan: '{reason}'. Rewrite the element `{element_name}` in `{file_path_relative}`.
-Original Code:
-```python
-{original_snippet}```
-
-Provide only the complete, updated code block."""
+            
+        if file_path_relative.endswith('.py'):
+            if file_path_absolute not in editors:
+                try:
+                    editors[file_path_absolute] = CodeEditor(file_path_absolute)
+                except Exception as e:
+                    ui_manager.show_error(
+                        f'Error loading file {file_path_absolute}: {e}')
+                    return False
+            editor = editors[file_path_absolute]
+            
+            # Get the snippet for the specific lines
+            original_snippet = editor.get_element_body_snippet(
+                element_name, line_start, line_end
+            )
+            if not original_snippet:
+                # Fallback: get full element if snippet extraction fails
+                original_snippet = editor.get_source_of(element_name)
+                if not original_snippet:
+                    ui_manager.show_error(
+                        f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
+                    )
+                    return False
+                    
+            full_element_code = editor.get_source_of(element_name)
+            prompt = _create_prompt_for_partial_edit(
+                file_path_relative,
+                element_name,
+                reason,
+                original_snippet,
+                line_start,
+                line_end,
+                full_element_code
+            )
     elif action_type == 'CREATE':
         element_name = action.get('element_name')
         description = action.get('description')
-        prompt = (
-            f"Plan: '{description}'. Create a new element named `{element_name}` for `{file_path_relative}`. If the instruction is to create a file with specific content (e.g., a .txt or .csv), provide the full content in the code block. Otherwise, create the specified Python element."
-            )
+        action_details = {
+            'element_name': element_name,
+            'description': description
+        }
+        prompt = _create_prompt_for_refactor_action('CREATE', file_path_relative, action_details)
     else:
         ui_manager.show_error(f"Invalid action type '{action_type}'. Skipping."
             )
         return False
+        
     with ui_manager.show_spinner(
         f"AI: {action_type} on '{element_name or file_path_relative}'..."):
         response = query_llm(prompt)
@@ -743,6 +1122,7 @@ Provide only the complete, updated code block."""
             f'AI failed to generate content for action: {action}')
         print(Panel(response, title="[yellow]AI's Raw Response[/]"))
         return False
+        
     if not file_path_relative.endswith('.py'):
         try:
             FileCreator.create(file_path_absolute, new_content)
@@ -753,6 +1133,7 @@ Provide only the complete, updated code block."""
             ui_manager.show_error(
                 f"Failed to create file '{file_path_relative}': {e}")
             return False
+            
     if file_path_absolute not in editors:
         try:
             if not os.path.exists(file_path_absolute):
@@ -764,13 +1145,23 @@ Provide only the complete, updated code block."""
             ui_manager.show_error(
                 f'Error loading file {file_path_absolute}: {e}')
             return False
+            
     editor = editors[file_path_absolute]
+    
     if action_type == 'MODIFY':
         if not editor.replace_element(element_name, new_content):
             ui_manager.show_error(
                 f"Failed to apply MODIFY change to '{element_name}'.")
             print(Panel(new_content, title=
                 f"[red]Problematic MODIFY Code for '{element_name}'[/]",
+                border_style='red'))
+            return False
+    elif action_type == 'PARTIAL':
+        if not editor.replace_partial(element_name, new_content, line_start, line_end):
+            ui_manager.show_error(
+                f"Failed to apply PARTIAL change to '{element_name}'.")
+            print(Panel(new_content, title=
+                f"[red]Problematic PARTIAL Code for '{element_name}'[/]",
                 border_style='red'))
             return False
     elif action_type == 'CREATE':
@@ -807,7 +1198,44 @@ def handle_project_refactor_command(instruction: str):
     total_actions = len(actions)
     for i, action in enumerate(actions, 1):
         ui_manager.show_success(f'Processing action {i}/{total_actions}...')
-        if _process_refactor_action(action, project_base_path, editors):
+        action_type = action.get('type', '').upper()
+        file_path_relative = action.get('file')
+        if not file_path_relative:
+            ui_manager.show_error(
+                f"Action is missing 'file' key. Skipping: {action}")
+            continue
+        file_path_absolute = os.path.join(project_base_path, file_path_relative
+            )
+        if action_type == 'DELETE':
+            element_name = action.get('element')
+            if not element_name:
+                ui_manager.show_error(
+                    f"DELETE action missing 'element' key. Skipping: {action}")
+                continue
+            if not file_path_relative.endswith('.py'):
+                ui_manager.show_error(
+                    f'DELETE actions are only supported for Python files. Skipping.'
+                    )
+                continue
+            if file_path_absolute not in editors:
+                try:
+                    editors[file_path_absolute] = CodeEditor(file_path_absolute
+                        )
+                except Exception as e:
+                    ui_manager.show_error(
+                        f'Error loading file {file_path_absolute}: {e}')
+                    continue
+            editor = editors[file_path_absolute]
+            if editor.delete_element(element_name):
+                successful_actions += 1
+                ui_manager.show_success(
+                    f"Successfully deleted '{element_name}' from '{file_path_relative}'."
+                    )
+            else:
+                ui_manager.show_error(
+                    f"Failed to delete '{element_name}' from '{file_path_relative}'."
+                    )
+        elif _process_refactor_action(action, project_base_path, editors):
             successful_actions += 1
         else:
             ui_manager.show_error(
@@ -823,6 +1251,37 @@ def handle_project_refactor_command(instruction: str):
         ui_manager.show_success(
             f'All {total_actions} actions completed successfully.')
     _apply_refactor_changes(editors)
+
+
+def _create_prompt_for_commit_message(diff: str) -> str:
+    """
+    Create a dedicated prompt function for the 'commit' command. This prompt will
+    instruct the AI to analyze a git diff and generate a concise commit message
+    following the Conventional Commits standard.
+    """
+    return f"""You are an expert developer writing a Git commit message. Your task is to analyze the provided git diff and create a professional commit message.
+
+COMMIT MESSAGE RULES:
+- Follow the Conventional Commits specification
+- Format: <type>(<optional scope>): <subject>
+- Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+- Subject line: max 50 characters, imperative mood, no period
+- Optional body: explain what and why (not how), wrap at 72 characters
+- Be specific and concise
+- Focus on the intent and impact of the changes
+
+EXAMPLES OF GOOD COMMIT MESSAGES:
+- feat(auth): add OAuth2 integration for Google login
+- fix(api): handle null response in user endpoint
+- refactor(database): optimize query performance for large datasets
+- docs(readme): update installation instructions for Windows
+
+Respond with ONLY the commit message - no markdown, quotes, or explanations.
+
+--- GIT DIFF TO ANALYZE ---
+{diff}
+
+Generate the commit message:"""
 
 
 def handle_commit_command():
@@ -851,12 +1310,7 @@ def handle_commit_command():
         ui_manager.show_success(
             'No content changes detected (e.g., only file mode changes).')
         return
-    prompt = f"""You are an expert programmer writing a Git commit message. Based on the following git diff, write a concise and informative commit message that follows the Conventional Commits specification (e.g., 'feat: ...', 'fix: ...', 'docs: ...').
-The message should have a subject line (max 50 chars) and an optional body explaining the 'what' and 'why'.
-Respond with ONLY the raw commit message text, without any markdown or extra explanations.
-
---- GIT DIFF ---
-{full_diff}"""
+    prompt = _create_prompt_for_commit_message(full_diff)
     commit_message = query_llm(prompt).strip()
     if not commit_message:
         ui_manager.show_error(
