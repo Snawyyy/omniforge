@@ -2,7 +2,7 @@ import astor
 import ast
 from typing import Union
 import difflib
-from typing import List, Optional, Union
+from typing import List
 import sys
 
 

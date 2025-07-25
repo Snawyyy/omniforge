@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 import logging
 import json
 import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Tuple
 from core.instruction_enhancer import enhance_instruction
 logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
@@ -25,7 +25,6 @@ def request_structured_plan(prompt_text: str, expected_keys: Optional[set]=None
     Raises:
         PlanParsingError: If the model's response is not valid JSON or lacks required keys.
     """
-    from core.instruction_enhancer import enhance_instruction
     enhanced_prompt = enhance_instruction(prompt_text)
     logger.debug('Sending structured plan request to model.')
     raw_response = send_prompt_to_model(enhanced_prompt)

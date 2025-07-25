@@ -1,10 +1,9 @@
 from code_editor import CodeEditor
 from utils.logger import log_edit_event
-from utils.io_helpers import confirm_change, safe_write_file
-from core.diff_engine import generate_diff_text, show_diff
+from utils.io_helpers import confirm_change
+from core.diff_engine import show_diff
 from core.model_client import send_prompt_to_model
 from core.prompt_builder import build_edit_prompt
-from typing import Optional
 import os
 
 

@@ -1,7 +1,6 @@
 from ..ui_manager import UIManager
-from typing import Optional, Dict, Any
+from typing import Optional
 import requests
-import json
 import os
 ui = UIManager()
 

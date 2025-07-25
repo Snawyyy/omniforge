@@ -2,10 +2,8 @@ from typing import Optional
 import os
 import ast
 import keyword
-from typing import List, Optional, Union
+from typing import List
 from core.python_ast_adapter import PythonASTAdapter
-from typing import Optional, List, Any
-import astor
 
 
 def parse_ast_from_file(file_path: str) ->Optional[ast.AST]:

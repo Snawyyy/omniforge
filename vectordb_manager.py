@@ -5,7 +5,6 @@ from typing import List, Dict, Optional, Tuple
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import faiss
-from pathlib import Path
 
 
 class VectorDBManager:

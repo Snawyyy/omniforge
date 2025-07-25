@@ -1,6 +1,5 @@
 from typing import Dict, Any
 import json
-from utils.logger import log_prompt_build
 """
 Prompt Builder - A utility for constructing structured prompts for LLM interactions.
 

@@ -11,8 +11,8 @@ manipulation, and `astor` for code generation.
 import ast
 import astor
 import difflib
-from typing import List, Optional, Dict, Any, Tuple, Union
-from ast_adapter import ASTAdapter, ASTNode
+from typing import List, Optional, Dict, Tuple, Union
+from ast_adapter import ASTAdapter
 
 # Optional dependency check for asttokens (for enhanced partial edits)
 try:

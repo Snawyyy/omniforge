@@ -1,14 +1,10 @@
 from utils.logger import log_execution_step
 from utils.io_helpers import safe_write_file
-from core.diff_engine import generate_diff_text
-from core.ast_utils import apply_model_patch
 from typing import List, Dict, Any
 import shutil
 import os
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 import difflib
-from typing import List, Dict, Any, Tuple
+from typing import Tuple
 from memory_manager import get_memory_manager
 
 

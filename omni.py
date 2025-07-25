@@ -13,8 +13,6 @@ import argparse
 import ast
 from datetime import datetime
 import threading
-import queue as Queue
-import time
 from typing import List, Dict, Optional
 from rich import print
 from rich.panel import Panel
@@ -26,6 +24,7 @@ from memory_manager import MemoryManager
 from code_editor import CodeEditor
 from file_creator import FileCreator
 from git_manager import GitManager
+from rag_manager import RAGManager
 import traceback
 DEFAULT_BACKEND = 'openrouter'
 OLLAMA_MODEL = 'phi4-reasoning'
@@ -148,11 +147,13 @@ def query_openrouter(prompt: str) ->str:
         return response.json()['choices'][0]['message']['content']
     except Exception as e:
         error_details = ''
-        try:
-            error_details = response.json()
-        except:
-            error_details = response.text if hasattr(response, 'text'
-                ) else str(e)
+        if 'response' in locals() and hasattr(response, 'text'):
+            try:
+                error_details = response.json()
+            except json.JSONDecodeError:
+                error_details = response.text
+        else:
+            error_details = str(e)
         return (
             f'[bold red]OpenRouter Error:[/] {e}\n[dim]Details: {error_details}[/dim]'
             )
@@ -723,7 +724,7 @@ def handle_file_edit_command(file_path: str, instruction: str):
             resolved_path), element_to_edit, instruction, original_snippet)
         edit_type = 'ELEMENT'
         line_range = None
-    with ui_manager.show_spinner(f'AI is editing...'):
+    with ui_manager.show_spinner('AI is editing...'):
         response = query_llm(prompt2)
     code_blocks = extract_code(response)
     if not code_blocks:
@@ -1192,7 +1193,7 @@ def handle_project_refactor_command(instruction: str):
                     continue
                 if not file_path_relative.endswith('.py'):
                     error_msg = (
-                        f'DELETE actions are only supported for Python files. Skipping.'
+                        'DELETE actions are only supported for Python files. Skipping.'
                         )
                     ui_manager.show_error(error_msg)
                     failed_actions.append({'index': i, 'action': action,
@@ -1511,13 +1512,7 @@ def interactive_mode() ->None:
                     ui_manager.show_error('Usage: refactor "<instruction>"')
                 else:
                     handle_project_refactor_command(arg_str.strip('"'))
-            elif command == 'add':
-                try:
-                    subcommand, target = arg_str.split(' ', 1)
-                    handle_add_command(subcommand, target.strip('"'))
-                except (ValueError, IndexError):
-                    ui_manager.show_error(
-                        'Usage: add [feature|test|doc] <args>')
+            
             elif command == 'commit':
                 handle_commit_command()
             elif command == 'models':
@@ -1654,18 +1649,6 @@ def save_code(content: str, filename: str) ->None:
 
 
 def main() ->None:
-    try:
-        import astor
-    except ImportError:
-        print("[bold red]Error:[/] 'astor' is required. `pip install astor`")
-        sys.exit(1)
-    try:
-        import simple_term_menu
-    except ImportError:
-        print(
-            "[bold red]Error:[/] 'simple-term-menu' is required. `pip install simple-term-menu`"
-            )
-        sys.exit(1)
     parser = argparse.ArgumentParser(description=
         'Omni - AI-powered code tool', add_help=False)
     parser.add_argument('command', nargs='?', help='Main command.')

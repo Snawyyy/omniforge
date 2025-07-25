@@ -12,7 +12,6 @@ import astor
 import difflib
 from typing import List, Optional, Dict, Union, Tuple, Type, Any
 from ast_adapter import ASTAdapter
-from python_ast_adapter import PythonASTAdapter
 import os
 try:
     import asttokens
@@ -50,7 +49,7 @@ class CodeEditor:
                 try:
                     from python_ast_adapter import PythonASTAdapter
                     self.adapter = PythonASTAdapter(self.source_code)
-                except ImportError as e:
+                except ImportError:
                     try:
                         self.tree = self._parse_source()
                         self.nodes = self._map_nodes()

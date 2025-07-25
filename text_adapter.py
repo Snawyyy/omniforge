@@ -1,5 +1,5 @@
 from ast_adapter import ASTAdapter
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 """
 TextAdapter - Concrete AST adapter for plain text files.
 

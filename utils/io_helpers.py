@@ -6,7 +6,6 @@ import os
 from typing import TextIO
 import sys
 from utils.logger import log_debug
-from typing import List
 
 
 def safe_write_file(file_path: str, content: Union[str, AST], create_backup:

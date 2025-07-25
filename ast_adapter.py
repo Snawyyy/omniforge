@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any, Union
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 ASTNode = Any
 DiffContent = str
 

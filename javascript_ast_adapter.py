@@ -8,9 +8,8 @@ leveraging the tree-sitter library for parsing and manipulation.
 """
 
 import difflib
-import re
-from typing import List, Optional, Dict, Any, Tuple, Union
-from ast_adapter import ASTAdapter, ASTNode
+from typing import List, Optional, Dict, Any, Tuple
+from ast_adapter import ASTAdapter
 
 # Optional dependency check for tree-sitter
 try:
@@ -365,10 +364,6 @@ class JavaScriptASTAdapter(ASTAdapter):
             return False
 
         node = self.nodes[element_name]
-        
-        # Get the start and end bytes of the node
-        start_byte = node.start_byte
-        end_byte = node.end_byte
         
         # Find the full lines that contain the node
         # This is a simplified approach to avoid leaving partial lines

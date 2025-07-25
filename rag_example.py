@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import List, Dict, Tuple
+from typing import List
 """
 Example script demonstrating RAG (Retrieval-Augmented Generation) usage.
 
