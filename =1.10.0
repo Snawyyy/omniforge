@@ -1,0 +1,7 @@
+Collecting tree-sitter-languages
+  Downloading tree_sitter_languages-1.10.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (10 kB)
+Requirement already satisfied: tree-sitter in ./.venv/lib/python3.11/site-packages (from tree-sitter-languages) (0.25.0)
+Downloading tree_sitter_languages-1.10.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (8.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.4/8.4 MB 5.2 MB/s eta 0:00:00
+Installing collected packages: tree-sitter-languages
+Successfully installed tree-sitter-languages-1.10.2

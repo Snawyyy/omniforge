@@ -515,10 +515,11 @@ def _create_prompt_for_element_selection(file_name: str, instruction: str,
             element_details.append(detail)
         else:
             element_details.append(elem)
+    elements_str = ', '.join(element_details) if element_details else 'None'
     return f"""You are an expert code analyzer. Your task is to identify what should be modified based on the user's instruction.
 
 File: {file_name}
-Available elements: {', '.join(element_details) if element_details else 'None'}
+Available elements: {elements_str}
 
 User instruction: {instruction}
 
@@ -528,11 +529,17 @@ Choose one of these response types:
 2. "PARTIAL: <element_name> LINES: <start>-<end>" - to edit specific lines within an element
 3. "FILE" - to edit the entire file or multiple elements
 
+VALID ELEMENT NAMES:
+{chr(10).join(f'- {elem}' for elem in elements) if elements else 'None'}
+
 RULES:
 - If the instruction mentions specific line numbers or a specific part of a function, use PARTIAL
 - If the instruction targets an entire function/class, use ELEMENT
 - If the instruction requires changes to multiple elements or file structure, use FILE
 - For PARTIAL edits, provide absolute line numbers from the original file
+- ONLY use element names from the "Available elements" list above
+- If no suitable element exists, use "FILE"
+- NEVER return an element name that is not in the available list
 
 What should be edited?"""
 
