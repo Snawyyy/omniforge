@@ -29,7 +29,7 @@ from git_manager import GitManager
 import traceback
 DEFAULT_BACKEND = 'openrouter'
 OLLAMA_MODEL = 'phi4-reasoning'
-OPENROUTER_MODEL = 'google/gemini-2.5-pro'
+OPENROUTER_MODEL = 'qwen/qwen3-coder'
 DEFAULT_SAVE_DIR = os.path.expanduser('/mnt/ProjectData/omni/omni_saves/')
 CONFIG_FILE = 'config.json'
 MEMORY_FILE = 'memory.json'
@@ -318,9 +318,6 @@ def look_command(path: str) ->None:
             ui_manager.show_error(f'❌ Error reading file: {e}')
 
 
-# This function is defined in the MemoryManager class, not here
-
-
 def resolve_file_path(path: str) ->Optional[str]:
     """Resolves a file path, checking CWD first, then against project root in memory."""
     if os.path.exists(path):
@@ -333,7 +330,7 @@ def resolve_file_path(path: str) ->Optional[str]:
     return None
 
 
-def _create_prompt_for_file_creation(file_name: str, instruction: str) -> str:
+def _create_prompt_for_file_creation(file_name: str, instruction: str) ->str:
     """
     Generate a robust prompt for file creation that instructs the AI to act as an expert,
     produce complete and clean code, and avoid any extra commentary.
@@ -364,7 +361,8 @@ def handle_file_create_command(file_path: str, instruction: str):
             ) not in ['yes', 'y']:
             ui_manager.show_error('File creation cancelled.')
             return
-    prompt = _create_prompt_for_file_creation(os.path.basename(file_path), instruction)
+    prompt = _create_prompt_for_file_creation(os.path.basename(file_path),
+        instruction)
     with ui_manager.show_spinner(
         f"AI is generating content for '{file_path}'..."):
         response = query_llm(prompt)
@@ -484,21 +482,22 @@ def _load_all_project_files_if_needed():
             )
 
 
-def _create_prompt_for_element_selection(file_name: str, instruction: str, elements: List[str], element_structures: Dict[str, Dict]) -> str:
+def _create_prompt_for_element_selection(file_name: str, instruction: str,
+    elements: List[str], element_structures: Dict[str, Dict]) ->str:
     """
     Create a helper for the first stage of the 'edit' command. This prompt asks the AI
     to analyze the user's instruction and intelligently select the most relevant code element to modify.
     """
-    # Build element details for better context
     element_details = []
     for elem in elements:
         if elem in element_structures:
             struct = element_structures[elem]
-            detail = f"{elem} ({struct['type']}, lines {struct['line_start']}-{struct['line_end']})"
+            detail = (
+                f"{elem} ({struct['type']}, lines {struct['line_start']}-{struct['line_end']})"
+                )
             element_details.append(detail)
         else:
             element_details.append(elem)
-    
     return f"""You are an expert code analyzer. Your task is to identify what should be modified based on the user's instruction.
 
 File: {file_name}
@@ -521,7 +520,8 @@ RULES:
 What should be edited?"""
 
 
-def _create_prompt_for_element_rewrite(file_name: str, element_name: str, instruction: str, original_code: str, is_full_file: bool = False) -> str:
+def _create_prompt_for_element_rewrite(file_name: str, element_name: str,
+    instruction: str, original_code: str, is_full_file: bool=False) ->str:
     """
     Create a helper for the second stage of the 'edit' command. This prompt instructs the AI
     to rewrite a specific code element (or the whole file) based on the user's request,
@@ -568,9 +568,9 @@ Current element code:
 Generate the complete updated element now:"""
 
 
-def _create_prompt_for_partial_edit(file_name: str, element_name: str, instruction: str, 
-                                   original_snippet: str, line_start: int, line_end: int,
-                                   full_element_code: str) -> str:
+def _create_prompt_for_partial_edit(file_name: str, element_name: str,
+    instruction: str, original_snippet: str, line_start: int, line_end: int,
+    full_element_code: str) ->str:
     """
     Create a prompt for partial edits within a function or class.
     This allows surgical changes to specific parts of code.
@@ -623,127 +623,90 @@ def handle_file_edit_command(file_path: str, instruction: str):
     except (ValueError, FileNotFoundError) as e:
         ui_manager.show_error(str(e))
         return
-    
     elements = editor.list_elements()
-    # Get detailed structure for each element
     element_structures = {}
     for elem in elements:
         struct = editor.get_element_structure(elem)
         if struct:
             element_structures[elem] = struct
-    
-    prompt1 = _create_prompt_for_element_selection(
-        os.path.basename(resolved_path), instruction, elements, element_structures
-    )
+    prompt1 = _create_prompt_for_element_selection(os.path.basename(
+        resolved_path), instruction, elements, element_structures)
     with ui_manager.show_spinner('AI is analyzing file...'):
         ai_response = query_llm(prompt1).strip()
-    
-    # Parse AI response
     if ai_response.upper() == 'FILE':
-        # Full file edit
         ui_manager.show_success('AI has chosen to edit the entire file.')
         original_snippet = editor.source_code
-        prompt2 = _create_prompt_for_element_rewrite(
-            os.path.basename(resolved_path), 
-            'entire file', 
-            instruction, 
-            original_snippet, 
-            is_full_file=True
-        )
+        prompt2 = _create_prompt_for_element_rewrite(os.path.basename(
+            resolved_path), 'entire file', instruction, original_snippet,
+            is_full_file=True)
         edit_type = 'FILE'
         element_to_edit = None
         line_range = None
     elif ai_response.startswith('PARTIAL:'):
-        # Partial edit within an element
         parts = ai_response.split()
         element_to_edit = parts[1]
         if 'LINES:' in ai_response:
             line_part = ai_response.split('LINES:')[1].strip()
             if '-' in line_part:
                 line_start, line_end = map(int, line_part.split('-'))
-                line_range = (line_start, line_end)
+                line_range = line_start, line_end
             else:
                 ui_manager.show_error('Invalid line range format')
                 return
         else:
             ui_manager.show_error('Missing line range for partial edit')
             return
-            
         if element_to_edit not in elements:
             ui_manager.show_error(f"Element '{element_to_edit}' not found")
             return
-            
         ui_manager.show_success(
             f"AI selected partial edit of '{element_to_edit}' (lines {line_start}-{line_end})"
-        )
-        
-        # Get the snippet for the specific lines
-        original_snippet = editor.get_element_body_snippet(
-            element_to_edit, line_start, line_end
-        )
+            )
+        original_snippet = editor.get_element_body_snippet(element_to_edit,
+            line_start, line_end)
         if not original_snippet:
-            # Fallback: get full element if snippet extraction fails
             original_snippet = editor.get_source_of(element_to_edit)
-            
         full_element_code = editor.get_source_of(element_to_edit)
-        prompt2 = _create_prompt_for_partial_edit(
-            os.path.basename(resolved_path),
-            element_to_edit,
-            instruction,
-            original_snippet,
-            line_start,
-            line_end,
-            full_element_code
-        )
+        prompt2 = _create_prompt_for_partial_edit(os.path.basename(
+            resolved_path), element_to_edit, instruction, original_snippet,
+            line_start, line_end, full_element_code)
         edit_type = 'PARTIAL'
     elif ai_response.startswith('ELEMENT:'):
-        # Full element edit
         element_to_edit = ai_response.split(':', 1)[1].strip()
         if element_to_edit not in elements:
             ui_manager.show_error(
                 f"AI identified '{element_to_edit}', which is not a valid element. Aborting."
-            )
+                )
             return
-        ui_manager.show_success(f"AI selected '{element_to_edit}' for editing.")
+        ui_manager.show_success(f"AI selected '{element_to_edit}' for editing."
+            )
         original_snippet = editor.get_source_of(element_to_edit)
-        prompt2 = _create_prompt_for_element_rewrite(
-            os.path.basename(resolved_path), 
-            element_to_edit, 
-            instruction, 
-            original_snippet
-        )
+        prompt2 = _create_prompt_for_element_rewrite(os.path.basename(
+            resolved_path), element_to_edit, instruction, original_snippet)
         edit_type = 'ELEMENT'
         line_range = None
     else:
-        # Legacy format - assume it's an element name
         element_to_edit = ai_response.splitlines()[0]
         if element_to_edit not in elements:
             ui_manager.show_error(
                 f"AI identified '{element_to_edit}', which is not a valid element. Aborting."
-            )
+                )
             return
-        ui_manager.show_success(f"AI selected '{element_to_edit}' for editing.")
+        ui_manager.show_success(f"AI selected '{element_to_edit}' for editing."
+            )
         original_snippet = editor.get_source_of(element_to_edit)
-        prompt2 = _create_prompt_for_element_rewrite(
-            os.path.basename(resolved_path), 
-            element_to_edit, 
-            instruction, 
-            original_snippet
-        )
+        prompt2 = _create_prompt_for_element_rewrite(os.path.basename(
+            resolved_path), element_to_edit, instruction, original_snippet)
         edit_type = 'ELEMENT'
         line_range = None
-    
-    with ui_manager.show_spinner(f"AI is editing..."):
+    with ui_manager.show_spinner(f'AI is editing...'):
         response = query_llm(prompt2)
-    
     code_blocks = extract_code(response)
     if not code_blocks:
         ui_manager.show_error('AI did not return a valid code block.')
         print(Panel(response, title="[yellow]AI's Raw Response[/]"))
         return
     new_code = code_blocks[0][1]
-    
-    # Apply the edit based on type
     success = False
     if edit_type == 'FILE':
         try:
@@ -754,25 +717,19 @@ def handle_file_edit_command(file_path: str, instruction: str):
             print(Panel(response, title="[yellow]AI's Raw Response[/]"))
             return
     elif edit_type == 'PARTIAL':
-        # Use the new partial replacement method
-        success = editor.replace_partial(
-            element_to_edit, 
-            new_code, 
-            line_start=line_range[0], 
-            line_end=line_range[1]
-        )
+        success = editor.replace_partial(element_to_edit, new_code,
+            line_start=line_range[0], line_end=line_range[1])
         if not success:
             ui_manager.show_error('Failed to apply partial edit.')
             print(Panel(response, title="[yellow]AI's Raw Response[/]"))
             return
-    else:  # ELEMENT
+    else:
         success = editor.replace_element(element_to_edit, new_code)
         if not success:
             ui_manager.show_error(
                 'AI returned invalid code; could not be parsed or applied.')
             print(Panel(response, title="[yellow]AI's Raw Response[/]"))
             return
-    
     if not (diff := editor.get_diff()):
         ui_manager.show_success('AI made no changes.')
         return
@@ -787,7 +744,8 @@ def handle_file_edit_command(file_path: str, instruction: str):
         ui_manager.show_error('Changes discarded.')
 
 
-def _create_prompt_for_refactor_plan(instruction: str, memory_context: str) -> str:
+def _create_prompt_for_refactor_plan(instruction: str, memory_context: str
+    ) ->str:
     """
     Create a specialized prompt-generation function for the 'refactor' command.
     This prompt will explicitly define the required JSON structure for the plan
@@ -900,18 +858,16 @@ def _display_and_confirm_plan(plan: Dict) ->bool:
         element = action.get('element') or action.get('element_name', 'N/A')
         reason = action.get('reason') or action.get('description', '')
         file_path = action.get('file', '')
-        
-        # Format based on action type
         if action_type == 'PARTIAL':
             line_start = action.get('line_start', '?')
             line_end = action.get('line_end', '?')
             print(
-                f"  [cyan]{i + 1}. {action_type}:[/] {file_path}/{element} (lines {line_start}-{line_end}) - {reason}"
-            )
+                f'  [cyan]{i + 1}. {action_type}:[/] {file_path}/{element} (lines {line_start}-{line_end}) - {reason}'
+                )
         else:
             print(
-                f"  [cyan]{i + 1}. {action_type}:[/] {file_path}/{element} - {reason}"
-            )
+                f'  [cyan]{i + 1}. {action_type}:[/] {file_path}/{element} - {reason}'
+                )
     if ui_manager.get_user_input('\nProceed with this plan? (y/n): ').lower(
         ) in ['yes', 'y']:
         return True
@@ -953,7 +909,8 @@ def _apply_refactor_changes(editors: Dict[str, CodeEditor]) ->None:
         ui_manager.show_error('Changes discarded.')
 
 
-def _create_prompt_for_refactor_action(action_type: str, file_path: str, action_details: Dict) -> str:
+def _create_prompt_for_refactor_action(action_type: str, file_path: str,
+    action_details: Dict) ->str:
     """
     Create a helper to generate prompts for individual 'CREATE' or 'MODIFY' steps
     within a refactor plan. This ensures the AI produces code for the specific
@@ -983,7 +940,6 @@ Current element code:
 ```
 
 Generate the updated element code:"""
-    
     elif action_type == 'CREATE':
         element_name = action_details['element_name']
         description = action_details['description']
@@ -1029,7 +985,6 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
     file_path_absolute = os.path.join(project_base_path, file_path_relative)
     action_type = action.get('type', '').upper()
     prompt, element_name = '', ''
-    
     if action_type == 'MODIFY':
         element_name = action.get('element')
         reason = action.get('reason')
@@ -1049,69 +1004,53 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
                     f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
                     )
                 return False
-            action_details = {
-                'element_name': element_name,
-                'reason': reason,
-                'original_code': original_snippet
-            }
-            prompt = _create_prompt_for_refactor_action('MODIFY', file_path_relative, action_details)
+            action_details = {'element_name': element_name, 'reason':
+                reason, 'original_code': original_snippet}
+            prompt = _create_prompt_for_refactor_action('MODIFY',
+                file_path_relative, action_details)
     elif action_type == 'PARTIAL':
         element_name = action.get('element')
         reason = action.get('reason')
         line_start = action.get('line_start')
         line_end = action.get('line_end')
-        
         if not all([element_name, line_start, line_end]):
             ui_manager.show_error(
-                f"PARTIAL action missing required fields. Skipping: {action}")
+                f'PARTIAL action missing required fields. Skipping: {action}')
             return False
-            
         if file_path_relative.endswith('.py'):
             if file_path_absolute not in editors:
                 try:
-                    editors[file_path_absolute] = CodeEditor(file_path_absolute)
+                    editors[file_path_absolute] = CodeEditor(file_path_absolute
+                        )
                 except Exception as e:
                     ui_manager.show_error(
                         f'Error loading file {file_path_absolute}: {e}')
                     return False
             editor = editors[file_path_absolute]
-            
-            # Get the snippet for the specific lines
-            original_snippet = editor.get_element_body_snippet(
-                element_name, line_start, line_end
-            )
+            original_snippet = editor.get_element_body_snippet(element_name,
+                line_start, line_end)
             if not original_snippet:
-                # Fallback: get full element if snippet extraction fails
                 original_snippet = editor.get_source_of(element_name)
                 if not original_snippet:
                     ui_manager.show_error(
                         f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
-                    )
+                        )
                     return False
-                    
             full_element_code = editor.get_source_of(element_name)
-            prompt = _create_prompt_for_partial_edit(
-                file_path_relative,
-                element_name,
-                reason,
-                original_snippet,
-                line_start,
-                line_end,
-                full_element_code
-            )
+            prompt = _create_prompt_for_partial_edit(file_path_relative,
+                element_name, reason, original_snippet, line_start,
+                line_end, full_element_code)
     elif action_type == 'CREATE':
         element_name = action.get('element_name')
         description = action.get('description')
-        action_details = {
-            'element_name': element_name,
-            'description': description
-        }
-        prompt = _create_prompt_for_refactor_action('CREATE', file_path_relative, action_details)
+        action_details = {'element_name': element_name, 'description':
+            description}
+        prompt = _create_prompt_for_refactor_action('CREATE',
+            file_path_relative, action_details)
     else:
         ui_manager.show_error(f"Invalid action type '{action_type}'. Skipping."
             )
         return False
-        
     with ui_manager.show_spinner(
         f"AI: {action_type} on '{element_name or file_path_relative}'..."):
         response = query_llm(prompt)
@@ -1122,7 +1061,6 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
             f'AI failed to generate content for action: {action}')
         print(Panel(response, title="[yellow]AI's Raw Response[/]"))
         return False
-        
     if not file_path_relative.endswith('.py'):
         try:
             FileCreator.create(file_path_absolute, new_content)
@@ -1133,7 +1071,6 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
             ui_manager.show_error(
                 f"Failed to create file '{file_path_relative}': {e}")
             return False
-            
     if file_path_absolute not in editors:
         try:
             if not os.path.exists(file_path_absolute):
@@ -1145,9 +1082,7 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
             ui_manager.show_error(
                 f'Error loading file {file_path_absolute}: {e}')
             return False
-            
     editor = editors[file_path_absolute]
-    
     if action_type == 'MODIFY':
         if not editor.replace_element(element_name, new_content):
             ui_manager.show_error(
@@ -1157,7 +1092,8 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
                 border_style='red'))
             return False
     elif action_type == 'PARTIAL':
-        if not editor.replace_partial(element_name, new_content, line_start, line_end):
+        if not editor.replace_partial(element_name, new_content, line_start,
+            line_end):
             ui_manager.show_error(
                 f"Failed to apply PARTIAL change to '{element_name}'.")
             print(Panel(new_content, title=
@@ -1253,7 +1189,7 @@ def handle_project_refactor_command(instruction: str):
     _apply_refactor_changes(editors)
 
 
-def _create_prompt_for_commit_message(diff: str) -> str:
+def _create_prompt_for_commit_message(diff: str) ->str:
     """
     Create a dedicated prompt function for the 'commit' command. This prompt will
     instruct the AI to analyze a git diff and generate a concise commit message
@@ -1351,6 +1287,122 @@ def handle_commit_command():
         ui_manager.show_error('Commit aborted by user.')
 
 
+def handle_rag_query_command(query: str):
+    """
+    Handles RAG query commands in the CLI.
+    
+    This function provides a way to query the RAG system from the command line interface.
+    It loads the RAG manager, performs the query, and displays the results.
+    
+    Args:
+        query: The query string to search for in the RAG system.
+    """
+    try:
+        rag_manager = RAGManager()
+        if rag_manager.get_document_count() == 0:
+            ui_manager.show_error('RAG index is empty. Add documents first.')
+            return
+        results = rag_manager.search(query, k=3)
+        if not results:
+            ui_manager.show_error('No relevant documents found.')
+            return
+        print(Panel(f'[bold cyan]RAG Query:[/bold cyan] {query}', title=
+            '[bold]Retrieval-Augmented Generation Results[/bold]',
+            border_style='cyan'))
+        for i, (doc, score, metadata) in enumerate(results, 1):
+            file_info = metadata.get('file', 'Unknown source')
+            content_preview = doc[:200] + '...' if len(doc) > 200 else doc
+            result_panel = Panel(
+                f"""[dim]Source:[/] {file_info}
+[dim]Relevance:[/] {score:.4f}
+
+{content_preview}"""
+                , title=f'[bold]Result {i}[/bold]', border_style='blue',
+                expand=False)
+            print(result_panel)
+        if ui_manager.get_user_input(
+            '\nGenerate detailed response with AI? (y/n): ').lower() in ['yes',
+            'y']:
+            context = '\n\n'.join([
+                f'Document {i} (Score: {score:.4f}):\n{doc}' for i, (doc,
+                score, _) in enumerate(results, 1)])
+            prompt = f"""Based on the following retrieved documents, please answer the query: "{query}"
+
+Retrieved Documents:
+{context}
+
+Please provide a comprehensive answer based only on the information in the documents above.
+If the documents don't contain enough information to answer the query, please say so."""
+            with ui_manager.show_spinner('AI is generating response...'):
+                response = query_llm(prompt)
+            print(Panel(response, title=
+                '[bold green]AI-Generated Response[/bold green]',
+                border_style='green'))
+    except Exception as e:
+        ui_manager.show_error(f'Error processing RAG query: {e}')
+        if os.getenv('OMNIFORGE_DEBUG'):
+            import traceback
+            traceback.print_exc()
+
+
+def handle_rag_query_command(query: str):
+    """
+    Handles RAG query commands in the CLI.
+    
+    This function provides a way to query the RAG system from the command line interface.
+    It loads the RAG manager, performs the query, and displays the results.
+    
+    Args:
+        query: The query string to search for in the RAG system.
+    """
+    try:
+        rag_manager = RAGManager()
+        if rag_manager.get_document_count() == 0:
+            ui_manager.show_error('RAG index is empty. Add documents first.')
+            return
+        results = rag_manager.search(query, k=3)
+        if not results:
+            ui_manager.show_error('No relevant documents found.')
+            return
+        print(Panel(f'[bold cyan]RAG Query:[/bold cyan] {query}', title=
+            '[bold]Retrieval-Augmented Generation Results[/bold]',
+            border_style='cyan'))
+        for i, (doc, score, metadata) in enumerate(results, 1):
+            file_info = metadata.get('file', 'Unknown source')
+            content_preview = doc[:200] + '...' if len(doc) > 200 else doc
+            result_panel = Panel(
+                f"""[dim]Source:[/] {file_info}
+[dim]Relevance:[/] {score:.4f}
+
+{content_preview}"""
+                , title=f'[bold]Result {i}[/bold]', border_style='blue',
+                expand=False)
+            print(result_panel)
+        if ui_manager.get_user_input(
+            '\nGenerate detailed response with AI? (y/n): ').lower() in ['yes',
+            'y']:
+            context = '\n\n'.join([
+                f'Document {i} (Score: {score:.4f}):\n{doc}' for i, (doc,
+                score, _) in enumerate(results, 1)])
+            prompt = f"""Based on the following retrieved documents, please answer the query: "{query}"
+
+Retrieved Documents:
+{context}
+
+Please provide a comprehensive answer based only on the information in the documents above.
+If the documents don't contain enough information to answer the query, please say so."""
+            with ui_manager.show_spinner('AI is generating response...'):
+                response = query_llm(prompt)
+            print(Panel(response, title=
+                '[bold green]AI-Generated Response[/bold green]',
+                border_style='green'))
+    except Exception as e:
+        ui_manager.show_error(f'Error processing RAG query: {e}')
+        if os.getenv('OMNIFORGE_DEBUG'):
+            import traceback
+            traceback.print_exc()
+
+
 def interactive_mode() ->None:
     global last_query, last_response, last_code
     try:
@@ -1397,6 +1449,7 @@ def interactive_mode() ->None:
   [yellow]edit <file> "instr"[/]   - Edit a specific file using AI.
   [yellow]refactor "instr"[/]      - Refactor project in memory based on instruction.
   [yellow]commit[/]               - Commit changes with an AI-generated message.
+  [yellow]rag <query>[/]         - Query the RAG system for context retrieval.
 
   [bold cyan]File & Code Management[/]
   [yellow]save <filename>[/]     - Save last AI response to a file.
@@ -1492,6 +1545,57 @@ def interactive_mode() ->None:
                 files = sorted(os.listdir(DEFAULT_SAVE_DIR))
                 print('\n'.join(f'  - {f}' for f in files) if files else
                     '[yellow]No saved files.[/]')
+            elif command == 'rag':
+                if not arg_str:
+                    ui_manager.show_error('Usage: rag "<query>"')
+                else:
+                    from rag_manager import RAGManager
+                    project_root = memory_manager.get_project_root()
+                    if not project_root:
+                        ui_manager.show_error(
+                            "No project context in memory. Use 'look <directory>' first."
+                            )
+                        continue
+                    rag = RAGManager()
+                    if rag.get_document_count() == 0:
+                        ui_manager.show_error(
+                            'RAG index is empty. Please add documents first.')
+                        continue
+                    results = rag.search(arg_str, k=3)
+                    if not results:
+                        ui_manager.show_error('No relevant documents found.')
+                        continue
+                    print(Panel('[bold]RAG Results:[/]', title=
+                        '[cyan]Retrieval-Augmented Generation[/]'))
+                    for i, (content, score, metadata) in enumerate(results, 1):
+                        file_path = metadata.get('file', 'Unknown')
+                        print(
+                            f'[bold cyan]{i}. {file_path}[/] (Score: {score:.4f})'
+                            )
+                        print(Panel(content[:500] + '...' if len(content) >
+                            500 else content, border_style='dim'))
+                    follow_up = ui_manager.get_user_input(
+                        """
+Would you like to ask a follow-up question with this context? (y/n): """
+                        )
+                    if follow_up.lower() in ['y', 'yes']:
+                        follow_up_query = ui_manager.get_user_input(
+                            'Follow-up query: ')
+                        if follow_up_query:
+                            context_parts = [
+                                f'Document {i} (Score: {score:.4f}):\n{content}'
+                                 for i, (content, score, _) in enumerate(
+                                results, 1)]
+                            context = '\n\n'.join(context_parts)
+                            rag_prompt = f"""Based on the following context, please answer the question.
+
+Context:
+{context}
+
+Question: {follow_up_query}"""
+                            response = query_llm(rag_prompt)
+                            print(Panel(response, title=
+                                '[cyan]RAG-Augmented Response[/]'))
             else:
                 ui_manager.show_error("Unknown command. Type 'help'.")
             refresh_status_panel(personality_name)

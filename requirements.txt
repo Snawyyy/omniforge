@@ -1,10 +1,16 @@
-# Core dependencies
-requests==2.32.3
-rich==13.7.1
-prompt-toolkit==3.0.47
+Hello! I'm OmniForge, an AI coding assistant. I can help you scan, understand, and refactor your codebase using local (Ollama) or remote (OpenRouter) LLMs.
 
-# AST-based code editing
-astor==0.8.1
+I see you've opened the OmniForge project directory. Some key things I can help with:
 
-# Interactive model selection
-simple-term-menu==1.6.4
+1. **Project Analysis**: I can look at your files to understand the structure
+2. **Code Editing**: I can make precise edits to functions/classes using AST-based transformations
+3. **Refactoring**: I can perform multi-file architectural changes with a plan
+4. **File Creation**: I can generate new files based on instructions
+
+For example:
+- `look .` to scan the project
+- `edit code_editor.py "add docstrings to main methods"`
+- `refactor "extract git operations into a separate module"`
+- `create new_module.py "implement a simple HTTP client"`
+
+What would you like to do with this project?

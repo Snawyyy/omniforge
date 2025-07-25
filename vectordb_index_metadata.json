@@ -1,0 +1,50 @@
+[
+  {
+    "id": 0,
+    "hash": "43b76714d230bbe319bdf0de327c7192",
+    "content": "RAG stands for Retrieval-Augmented Generation, a technique that combines information retrieval with language generation.",
+    "file": "document_0"
+  },
+  {
+    "id": 1,
+    "hash": "dac60aa8d5e5861796640a8d9b3190a3",
+    "content": "The RAG model retrieves relevant documents from a knowledge base and uses them to generate more accurate responses.",
+    "file": "document_0"
+  },
+  {
+    "id": 2,
+    "hash": "f9ed7c2f9da6b1462806979d984ab5f3",
+    "content": "FAISS is a library for efficient similarity search and clustering of dense vectors, often used in RAG systems.",
+    "file": "document_0"
+  },
+  {
+    "id": 3,
+    "hash": "192336175c79d0194d2e51a613cbfa1b",
+    "content": "Sentence transformers are used to create embeddings for documents and queries in RAG systems.",
+    "file": "document_0"
+  },
+  {
+    "id": 4,
+    "hash": "92c5abaa3019f7294e5af489622302f5",
+    "content": "Retrieval-Augmented Generation improves language models by allowing them to access external knowledge sources.",
+    "file": "document_0"
+  },
+  {
+    "id": 5,
+    "hash": "92408c5c2b26cc7bb3e006f75f4f6f08",
+    "content": "In RAG systems, documents are indexed and searchable by their semantic embeddings rather than just keywords.",
+    "file": "document_0"
+  },
+  {
+    "id": 6,
+    "hash": "26ed14b833f20c4d6715cd2f9c44381a",
+    "content": "Python is a great language for implementing RAG systems due to libraries like sentence-transformers and faiss.",
+    "file": "document_0"
+  },
+  {
+    "id": 7,
+    "hash": "964a8aed30280d1b398f7b17dc6366bb",
+    "content": "The retrieval component of RAG is crucial for finding relevant information before generation.",
+    "file": "document_0"
+  }
+]
