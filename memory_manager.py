@@ -31,8 +31,26 @@ class MemoryManager:
             json.dump(memory, f, indent=4)
 
     def add_message(self, role: str, content: str) ->None:
+        """
+        Add a message to the chat history and save immediately.
+        
+        Args:
+            role: The role of the message sender (e.g., 'user', 'assistant')
+            content: The message content
+        """
         self.memory['chat'].append({'role': role, 'content': content})
         self.save_memory()
+
+    def add_chat_message(self, role: str, content: str) ->None:
+        """
+        Add a message to the chat history and save immediately.
+        This is an alias for add_message to maintain compatibility.
+        
+        Args:
+            role: The role of the message sender (e.g., 'user', 'assistant')
+            content: The message content
+        """
+        self.add_message(role, content)
 
     def add_look_data(self, file_path: str, content: str) ->None:
         """
@@ -67,7 +85,7 @@ class MemoryManager:
                     f'[yellow]Warning: Could not add {file_path} to RAG index: {e}[/]'
                     )
 
-    def get_project_root(self) -> Optional[str]:
+    def get_project_root(self) ->Optional[str]:
         """
         Finds the root directory of the project currently in memory.
 
@@ -82,7 +100,7 @@ class MemoryManager:
                 return item.get('file')
         return None
 
-    def get_memory_context(self) -> str:
+    def get_memory_context(self) ->str:
         """
         Dynamically builds the context using RAG and chat history.
 
@@ -91,32 +109,25 @@ class MemoryManager:
         recent chat history.
         """
         context = ''
-        # 1. Add project manifests for any watched directories
         for look in self.memory.get('look', []):
             path = look.get('file')
             if path and os.path.isdir(path):
                 content = look.get('content', '')
-                context += f'--- Project Manifest for {path} ---\n{content}\n\n'
-
-        # 2. Find the last user message to use as a query for the RAG system
-        last_user_message = next((msg['content'] for msg in reversed(self.memory.get('chat', [])) if msg['role'] == 'user'), None)
-
-        # 3. If a user message exists, search the RAG index for relevant context
+                context += (
+                    f'--- Project Manifest for {path} ---\n{content}\n\n')
+        last_user_message = next((msg['content'] for msg in reversed(self.
+            memory.get('chat', [])) if msg['role'] == 'user'), None)
         if last_user_message:
             rag_results = self.search_rag(last_user_message, k=3)
             if rag_results:
                 context += '--- Relevant context from RAG ---\n'
-                # Format and add each RAG result to the context
                 for doc, score, meta in rag_results:
                     file_path = meta.get('file', 'Unknown source')
                     context += f'Source: {file_path} (Score: {score:.4f})\n'
                     context += f'Content: {doc}\n---\n'
                 context += '\n'
-
-        # 4. Append the full chat history for conversational context
         for msg in self.memory.get('chat', []):
             context += f"{msg['role'].capitalize()}: {msg['content']}\n"
-
         return context.strip()
 
     def clear_memory(self) ->None:

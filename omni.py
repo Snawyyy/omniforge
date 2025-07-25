@@ -1486,6 +1486,8 @@ def interactive_mode() ->None:
                 last_query = arg_str
                 response = query_llm(arg_str)
                 last_response = response
+                memory_manager.add_chat_message('user', last_query)
+                memory_manager.add_chat_message('assistant', last_response)
                 if gui_enabled:
                     threading.Thread(target=show_sequential_popup, args=(
                         100, 100, response, f'Omni - {personality_name}'),
