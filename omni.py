@@ -1009,133 +1009,143 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
     file_path_absolute = os.path.join(project_base_path, file_path_relative)
     action_type = action.get('type', '').upper()
     prompt, element_name = '', ''
-    if action_type == 'MODIFY':
-        element_name = action.get('element')
-        reason = action.get('reason')
-        if file_path_relative.endswith('.py'):
-            if file_path_absolute not in editors:
-                try:
-                    editors[file_path_absolute] = CodeEditor(file_path_absolute
-                        )
-                except Exception as e:
-                    ui_manager.show_error(
-                        f'Error loading file {file_path_absolute}: {e}')
-                    return False
-            editor = editors[file_path_absolute]
-            original_snippet = editor.get_source_of(element_name)
-            if not original_snippet:
-                ui_manager.show_error(
-                    f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
-                    )
-                return False
-            action_details = {'element_name': element_name, 'reason':
-                reason, 'original_code': original_snippet}
-            prompt = _create_prompt_for_refactor_action('MODIFY',
-                file_path_relative, action_details)
-    elif action_type == 'PARTIAL':
-        element_name = action.get('element')
-        reason = action.get('reason')
-        line_start = action.get('line_start')
-        line_end = action.get('line_end')
-        if not all([element_name, line_start, line_end]):
-            ui_manager.show_error(
-                f'PARTIAL action missing required fields. Skipping: {action}')
-            return False
-        if file_path_relative.endswith('.py'):
-            if file_path_absolute not in editors:
-                try:
-                    editors[file_path_absolute] = CodeEditor(file_path_absolute
-                        )
-                except Exception as e:
-                    ui_manager.show_error(
-                        f'Error loading file {file_path_absolute}: {e}')
-                    return False
-            editor = editors[file_path_absolute]
-            original_snippet = editor.get_element_body_snippet(element_name,
-                line_start, line_end)
-            if not original_snippet:
+    try:
+        if action_type == 'MODIFY':
+            element_name = action.get('element')
+            reason = action.get('reason')
+            if file_path_relative.endswith('.py'):
+                if file_path_absolute not in editors:
+                    try:
+                        editors[file_path_absolute] = CodeEditor(
+                            file_path_absolute)
+                    except Exception as e:
+                        ui_manager.show_error(
+                            f'Error loading file {file_path_absolute}: {e}')
+                        return False
+                editor = editors[file_path_absolute]
                 original_snippet = editor.get_source_of(element_name)
                 if not original_snippet:
                     ui_manager.show_error(
                         f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
                         )
                     return False
-            full_element_code = editor.get_source_of(element_name)
-            prompt = _create_prompt_for_partial_edit(file_path_relative,
-                element_name, reason, original_snippet, line_start,
-                line_end, full_element_code)
-    elif action_type == 'CREATE':
-        element_name = action.get('element_name')
-        description = action.get('description')
-        action_details = {'element_name': element_name, 'description':
-            description}
-        prompt = _create_prompt_for_refactor_action('CREATE',
-            file_path_relative, action_details)
-    else:
-        ui_manager.show_error(f"Invalid action type '{action_type}'. Skipping."
+                action_details = {'element_name': element_name, 'reason':
+                    reason, 'original_code': original_snippet}
+                prompt = _create_prompt_for_refactor_action('MODIFY',
+                    file_path_relative, action_details)
+        elif action_type == 'PARTIAL':
+            element_name = action.get('element')
+            reason = action.get('reason')
+            line_start = action.get('line_start')
+            line_end = action.get('line_end')
+            if not all([element_name, line_start, line_end]):
+                ui_manager.show_error(
+                    f'PARTIAL action missing required fields. Skipping: {action}'
+                    )
+                return False
+            if file_path_relative.endswith('.py'):
+                if file_path_absolute not in editors:
+                    try:
+                        editors[file_path_absolute] = CodeEditor(
+                            file_path_absolute)
+                    except Exception as e:
+                        ui_manager.show_error(
+                            f'Error loading file {file_path_absolute}: {e}')
+                        return False
+                editor = editors[file_path_absolute]
+                original_snippet = editor.get_element_body_snippet(element_name
+                    , line_start, line_end)
+                if not original_snippet:
+                    original_snippet = editor.get_source_of(element_name)
+                    if not original_snippet:
+                        ui_manager.show_error(
+                            f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
+                            )
+                        return False
+                full_element_code = editor.get_source_of(element_name)
+                prompt = _create_prompt_for_partial_edit(file_path_relative,
+                    element_name, reason, original_snippet, line_start,
+                    line_end, full_element_code)
+        elif action_type == 'CREATE':
+            element_name = action.get('element_name')
+            description = action.get('description')
+            action_details = {'element_name': element_name, 'description':
+                description}
+            prompt = _create_prompt_for_refactor_action('CREATE',
+                file_path_relative, action_details)
+        else:
+            ui_manager.show_error(
+                f"Invalid action type '{action_type}'. Skipping.")
+            return False
+        with ui_manager.show_spinner(
+            f"AI: {action_type} on '{element_name or file_path_relative}'..."):
+            response = query_llm(prompt)
+        code_blocks = extract_code(response)
+        new_content = code_blocks[0][1] if code_blocks else response.strip()
+        if not new_content:
+            ui_manager.show_error(
+                f'AI failed to generate content for action: {action}')
+            print(Panel(response, title="[yellow]AI's Raw Response[/]"))
+            return False
+        if not file_path_relative.endswith('.py'):
+            try:
+                FileCreator.create(file_path_absolute, new_content)
+                ui_manager.show_success(
+                    f"File '{file_path_relative}' created/updated.")
+                return True
+            except IOError as e:
+                ui_manager.show_error(
+                    f"Failed to create file '{file_path_relative}': {e}")
+                return False
+        if file_path_absolute not in editors:
+            try:
+                if not os.path.exists(file_path_absolute):
+                    os.makedirs(os.path.dirname(file_path_absolute),
+                        exist_ok=True)
+                    with open(file_path_absolute, 'w') as f:
+                        f.write('')
+                editors[file_path_absolute] = CodeEditor(file_path_absolute)
+            except Exception as e:
+                ui_manager.show_error(
+                    f'Error loading file {file_path_absolute}: {e}')
+                return False
+        editor = editors[file_path_absolute]
+        if action_type == 'MODIFY':
+            if not editor.replace_element(element_name, new_content):
+                ui_manager.show_error(
+                    f"Failed to apply MODIFY change to '{element_name}'.")
+                print(Panel(new_content, title=
+                    f"[red]Problematic MODIFY Code for '{element_name}'[/]",
+                    border_style='red'))
+                return False
+        elif action_type == 'PARTIAL':
+            if not editor.replace_partial(element_name, new_content,
+                line_start, line_end):
+                ui_manager.show_error(
+                    f"Failed to apply PARTIAL change to '{element_name}'.")
+                print(Panel(new_content, title=
+                    f"[red]Problematic PARTIAL Code for '{element_name}'[/]",
+                    border_style='red'))
+                return False
+        elif action_type == 'CREATE':
+            anchor = action.get('anchor_element')
+            position = action.get('position', 'after')
+            if not editor.add_element(new_content, anchor_name=anchor,
+                before=position == 'before'):
+                ui_manager.show_error(
+                    f"Failed to apply CREATE change for '{element_name}'.")
+                print(Panel(new_content, title=
+                    f"[red]Problematic CREATE Code for '{element_name}'[/]",
+                    border_style='red'))
+                return False
+        return True
+    except Exception as e:
+        error_msg = (
+            f"Exception in {action_type} action on '{file_path_relative}': {str(e)}"
             )
+        ui_manager.show_error(error_msg)
+        traceback.print_exc()
         return False
-    with ui_manager.show_spinner(
-        f"AI: {action_type} on '{element_name or file_path_relative}'..."):
-        response = query_llm(prompt)
-    code_blocks = extract_code(response)
-    new_content = code_blocks[0][1] if code_blocks else response.strip()
-    if not new_content:
-        ui_manager.show_error(
-            f'AI failed to generate content for action: {action}')
-        print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-        return False
-    if not file_path_relative.endswith('.py'):
-        try:
-            FileCreator.create(file_path_absolute, new_content)
-            ui_manager.show_success(
-                f"File '{file_path_relative}' created/updated.")
-            return True
-        except IOError as e:
-            ui_manager.show_error(
-                f"Failed to create file '{file_path_relative}': {e}")
-            return False
-    if file_path_absolute not in editors:
-        try:
-            if not os.path.exists(file_path_absolute):
-                os.makedirs(os.path.dirname(file_path_absolute), exist_ok=True)
-                with open(file_path_absolute, 'w') as f:
-                    f.write('')
-            editors[file_path_absolute] = CodeEditor(file_path_absolute)
-        except Exception as e:
-            ui_manager.show_error(
-                f'Error loading file {file_path_absolute}: {e}')
-            return False
-    editor = editors[file_path_absolute]
-    if action_type == 'MODIFY':
-        if not editor.replace_element(element_name, new_content):
-            ui_manager.show_error(
-                f"Failed to apply MODIFY change to '{element_name}'.")
-            print(Panel(new_content, title=
-                f"[red]Problematic MODIFY Code for '{element_name}'[/]",
-                border_style='red'))
-            return False
-    elif action_type == 'PARTIAL':
-        if not editor.replace_partial(element_name, new_content, line_start,
-            line_end):
-            ui_manager.show_error(
-                f"Failed to apply PARTIAL change to '{element_name}'.")
-            print(Panel(new_content, title=
-                f"[red]Problematic PARTIAL Code for '{element_name}'[/]",
-                border_style='red'))
-            return False
-    elif action_type == 'CREATE':
-        anchor = action.get('anchor_element')
-        position = action.get('position', 'after')
-        if not editor.add_element(new_content, anchor_name=anchor, before=
-            position == 'before'):
-            ui_manager.show_error(
-                f"Failed to apply CREATE change for '{element_name}'.")
-            print(Panel(new_content, title=
-                f"[red]Problematic CREATE Code for '{element_name}'[/]",
-                border_style='red'))
-            return False
-    return True
 
 
 def handle_project_refactor_command(instruction: str):
@@ -1156,57 +1166,88 @@ def handle_project_refactor_command(instruction: str):
     project_base_path = memory_manager.get_project_root()
     successful_actions = 0
     total_actions = len(actions)
+    failed_actions = []
     for i, action in enumerate(actions, 1):
         ui_manager.show_success(f'Processing action {i}/{total_actions}...')
         action_type = action.get('type', '').upper()
         file_path_relative = action.get('file')
         if not file_path_relative:
-            ui_manager.show_error(
-                f"Action is missing 'file' key. Skipping: {action}")
+            error_msg = f"Action is missing 'file' key. Skipping: {action}"
+            ui_manager.show_error(error_msg)
+            failed_actions.append({'index': i, 'action': action, 'error':
+                error_msg})
             continue
         file_path_absolute = os.path.join(project_base_path, file_path_relative
             )
-        if action_type == 'DELETE':
-            element_name = action.get('element')
-            if not element_name:
-                ui_manager.show_error(
-                    f"DELETE action missing 'element' key. Skipping: {action}")
-                continue
-            if not file_path_relative.endswith('.py'):
-                ui_manager.show_error(
-                    f'DELETE actions are only supported for Python files. Skipping.'
-                    )
-                continue
-            if file_path_absolute not in editors:
-                try:
-                    editors[file_path_absolute] = CodeEditor(file_path_absolute
+        try:
+            if action_type == 'DELETE':
+                element_name = action.get('element')
+                if not element_name:
+                    error_msg = (
+                        f"DELETE action missing 'element' key. Skipping: {action}"
                         )
-                except Exception as e:
-                    ui_manager.show_error(
-                        f'Error loading file {file_path_absolute}: {e}')
+                    ui_manager.show_error(error_msg)
+                    failed_actions.append({'index': i, 'action': action,
+                        'error': error_msg})
                     continue
-            editor = editors[file_path_absolute]
-            if editor.delete_element(element_name):
+                if not file_path_relative.endswith('.py'):
+                    error_msg = (
+                        f'DELETE actions are only supported for Python files. Skipping.'
+                        )
+                    ui_manager.show_error(error_msg)
+                    failed_actions.append({'index': i, 'action': action,
+                        'error': error_msg})
+                    continue
+                if file_path_absolute not in editors:
+                    try:
+                        editors[file_path_absolute] = CodeEditor(
+                            file_path_absolute)
+                    except Exception as e:
+                        error_msg = (
+                            f'Error loading file {file_path_absolute}: {e}')
+                        ui_manager.show_error(error_msg)
+                        failed_actions.append({'index': i, 'action': action,
+                            'error': error_msg})
+                        continue
+                editor = editors[file_path_absolute]
+                if editor.delete_element(element_name):
+                    successful_actions += 1
+                    ui_manager.show_success(
+                        f"Successfully deleted '{element_name}' from '{file_path_relative}'."
+                        )
+                else:
+                    error_msg = (
+                        f"Failed to delete '{element_name}' from '{file_path_relative}'."
+                        )
+                    ui_manager.show_error(error_msg)
+                    failed_actions.append({'index': i, 'action': action,
+                        'error': error_msg})
+            elif _process_refactor_action(action, project_base_path, editors):
                 successful_actions += 1
-                ui_manager.show_success(
-                    f"Successfully deleted '{element_name}' from '{file_path_relative}'."
-                    )
             else:
-                ui_manager.show_error(
-                    f"Failed to delete '{element_name}' from '{file_path_relative}'."
-                    )
-        elif _process_refactor_action(action, project_base_path, editors):
-            successful_actions += 1
-        else:
-            ui_manager.show_error(
-                f'Action {i} failed, continuing with remaining actions...')
+                error_msg = (
+                    f'Action {i} failed, continuing with remaining actions...')
+                ui_manager.show_error(error_msg)
+                failed_actions.append({'index': i, 'action': action,
+                    'error': error_msg})
+        except Exception as e:
+            error_msg = f'Action {i} failed with exception: {str(e)}'
+            ui_manager.show_error(error_msg)
+            failed_actions.append({'index': i, 'action': action, 'error':
+                error_msg, 'exception': str(e)})
     if successful_actions == 0:
         ui_manager.show_error('No actions were successfully executed.')
-        return
     elif successful_actions < total_actions:
         ui_manager.show_error(
             f'Only {successful_actions}/{total_actions} actions completed successfully.'
             )
+        if failed_actions:
+            failure_details = '\n'.join([
+                f"  Action {fa['index']}: {fa['error']}" for fa in
+                failed_actions])
+            print(Panel(
+                f'[bold red]Failed Actions Summary:[/]\n{failure_details}',
+                title='[bold red]Refactor Incomplete[/]', border_style='red'))
     else:
         ui_manager.show_success(
             f'All {total_actions} actions completed successfully.')
@@ -1472,6 +1513,7 @@ def interactive_mode() ->None:
   [yellow]create <file> "instr"[/] - Create a new file using AI.
   [yellow]edit <file> "instr"[/]   - Edit a specific file using AI.
   [yellow]refactor "instr"[/]      - Refactor project in memory based on instruction.
+  [yellow]add <type> <args>[/]     - Add new features, tests, or documentation.
   [yellow]commit[/]               - Commit changes with an AI-generated message.
   [yellow]rag <query>[/]         - Query the RAG system for context retrieval.
 
@@ -1527,6 +1569,13 @@ def interactive_mode() ->None:
                     ui_manager.show_error('Usage: refactor "<instruction>"')
                 else:
                     handle_project_refactor_command(arg_str.strip('"'))
+            elif command == 'add':
+                try:
+                    subcommand, target = arg_str.split(' ', 1)
+                    handle_add_command(subcommand, target.strip('"'))
+                except (ValueError, IndexError):
+                    ui_manager.show_error(
+                        'Usage: add [feature|test|doc] <args>')
             elif command == 'commit':
                 handle_commit_command()
             elif command == 'models':
