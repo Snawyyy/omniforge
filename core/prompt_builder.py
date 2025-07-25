@@ -67,7 +67,7 @@ OUTPUT FORMAT (JSON SCHEMA):
   ]
 }}
 
-RULES:
+CONSTRAINTS:
 - Each step must clearly define its type and impact.
 - Do not use vague descriptions; be specific about file content or actions.
 - All file paths must be relative to the project root.
@@ -78,8 +78,21 @@ RULES:
 - Ensure all JSON keys are properly quoted and values are correctly escaped.
 - Wrap the final output strictly within JSON format as shown without any additional text.
 - Do not add any text before or after the JSON object.
-- Your response must be parseable as JSON directly."""
-    log_prompt_build('refactor', goal)
+- Your response must be parseable as JSON directly.
+- Do not make assumptions about unspecified files or behaviors.
+- Limit your response to a maximum of 10 steps.
+- Do not suggest changes to files not mentioned in the PROJECT CONTEXT unless explicitly required by the GOAL.
+- For MODIFY operations, use unified diff format in the 'details' field to show exact line changes.
+- For CREATE operations, include the complete file content in the 'details' field.
+- For DELETE operations, the 'details' field should explain why the file is being removed.
+- For RENAME operations, specify the new file path in the 'details' field.
+- All file operations should maintain the project's existing structure and naming conventions.
+- Do not propose changes that would break existing functionality unless explicitly instructed.
+- Only suggest modifications that directly contribute to achieving the stated GOAL.
+- Do not add features, comments, or code not explicitly requested in the GOAL.
+- Do not remove or modify existing functionality unless it is directly related to the GOAL.
+- Avoid hallucinations by only referencing files and code patterns present in the PROJECT CONTEXT.
+- If unsure about a change, prefer omitting it rather than making speculative modifications."""
     return prompt
 
 
