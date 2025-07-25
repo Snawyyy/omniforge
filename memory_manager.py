@@ -1,14 +1,16 @@
 import json
 import os
 from typing import List, Dict, Optional
+from rag_manager import RAGManager
 
 
 class MemoryManager:
-    """Manages persistent chat memory and look data via JSON."""
+    """Manages persistent chat memory, look data, and RAG integration via JSON."""
 
     def __init__(self, memory_file: str):
         self.memory_file = memory_file
         self.memory: Dict[str, List] = self.load_memory()
+        self.rag_manager = RAGManager()
 
     def load_memory(self) ->Dict[str, List]:
         try:
@@ -54,46 +56,83 @@ class MemoryManager:
         self.memory['look'].append({'type': item_type, 'file': file_path,
             'content': content})
         self.save_memory()
+        if item_type == 'file':
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                self.rag_manager.add_documents([file_content], [{'file':
+                    file_path}])
+            except Exception as e:
+                print(
+                    f'[yellow]Warning: Could not add {file_path} to RAG index: {e}[/]'
+                    )
 
-    def get_memory_context(self) ->str:
+    def get_project_root(self) -> Optional[str]:
         """
-    Dynamically builds the context. For files in 'look' memory, it reads
-    their current content from disk. For directories, it uses the stored
-    manifest. Appends the chat history.
-    """
+        Finds the root directory of the project currently in memory.
+
+        The project root is defined as the first item in the 'look' memory
+        that is of type 'directory'.
+
+        Returns:
+            The absolute path to the project root directory, or None if not found.
+        """
+        for item in self.memory.get('look', []):
+            if item.get('type') == 'directory':
+                return item.get('file')
+        return None
+
+    def get_memory_context(self) -> str:
+        """
+        Dynamically builds the context using RAG and chat history.
+
+        It retrieves relevant file content from the RAG index based on the latest
+        user query, includes project manifests for directories, and appends the
+        recent chat history.
+        """
         context = ''
+        # 1. Add project manifests for any watched directories
         for look in self.memory.get('look', []):
             path = look.get('file')
-            if not path:
-                continue
-            if os.path.isfile(path):
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    context += f'--- Content of {path} ---\n{content}\n\n'
-                except Exception:
-                    context += f'--- Content of {path} (UNREADABLE) ---\n\n'
-            elif os.path.isdir(path):
+            if path and os.path.isdir(path):
                 content = look.get('content', '')
-                if isinstance(content, tuple):
-                    content = content[0]
-                context += (
-                    f'--- Project Manifest for {path} ---\n{content}\n\n')
+                context += f'--- Project Manifest for {path} ---\n{content}\n\n'
+
+        # 2. Find the last user message to use as a query for the RAG system
+        last_user_message = next((msg['content'] for msg in reversed(self.memory.get('chat', [])) if msg['role'] == 'user'), None)
+
+        # 3. If a user message exists, search the RAG index for relevant context
+        if last_user_message:
+            rag_results = self.search_rag(last_user_message, k=3)
+            if rag_results:
+                context += '--- Relevant context from RAG ---\n'
+                # Format and add each RAG result to the context
+                for doc, score, meta in rag_results:
+                    file_path = meta.get('file', 'Unknown source')
+                    context += f'Source: {file_path} (Score: {score:.4f})\n'
+                    context += f'Content: {doc}\n---\n'
+                context += '\n'
+
+        # 4. Append the full chat history for conversational context
         for msg in self.memory.get('chat', []):
             context += f"{msg['role'].capitalize()}: {msg['content']}\n"
-        return context.strip()
 
-    def get_project_root(self) ->Optional[str]:
-        """
-    Finds the most recently added directory path in the 'look' memory.
-    This is assumed to be the project root, prioritizing the latest context.
-    """
-        for item in reversed(self.memory.get('look', [])):
-            path = item.get('file')
-            if path and os.path.isdir(path):
-                return path
-        return None
+        return context.strip()
 
     def clear_memory(self) ->None:
         self.memory = {'chat': [], 'look': []}
         self.save_memory()
+        self.rag_manager.clear_index()
+
+    def search_rag(self, query: str, k: int=3) ->List[tuple]:
+        """
+        Search the RAG index for relevant documents.
+        
+        Args:
+            query: The search query
+            k: Number of results to return
+            
+        Returns:
+            List of (document_content, score, metadata) tuples
+        """
+        return self.rag_manager.search(query, k)

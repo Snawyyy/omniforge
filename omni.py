@@ -107,7 +107,23 @@ def query_llm(prompt: str) ->str:
     personality = personality_manager.get_current_personality()
     system_prompt = personality.get('system_prompt', '') if personality else ''
     memory_context = memory_manager.get_memory_context()
-    full_prompt = f'{system_prompt}\n\n{memory_context}\n\nUser: {prompt}'
+    rag_context = ''
+    try:
+        from rag_manager import RAGManager
+        project_root = memory_manager.get_project_root()
+        if project_root:
+            rag_manager = RAGManager()
+            if rag_manager.get_document_count() > 0:
+                results = rag_manager.search(prompt, k=3)
+                if results:
+                    rag_context = '\n\nRelevant context from codebase:\n'
+                    for i, (doc, score, meta) in enumerate(results, 1):
+                        file_path = meta.get('file', 'Unknown')
+                        rag_context += f'{i}. [{file_path}] {doc}\n'
+    except Exception:
+        pass
+    full_prompt = (
+        f'{system_prompt}\n\n{memory_context}{rag_context}\n\nUser: {prompt}')
     with ui_manager.show_spinner('AI is listening and thinking...'):
         if current_backend == 'ollama':
             response = query_ollama(full_prompt)
@@ -249,7 +265,8 @@ def generate_project_manifest(path: str) ->tuple[str, List[str]]:
     manifest = ''
     file_paths = []
     tree = Tree(f'[bold cyan]Project: {os.path.basename(path)}[/]')
-    exclude_dirs = {'__pycache__', '.git', 'venv', 'node_modules', '.idea'}
+    exclude_dirs = {'__pycache__', '.git', 'venv', 'node_modules', '.idea',
+        'ollama'}
     for root, dirs, files in os.walk(path):
         dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.
             startswith('.')]
