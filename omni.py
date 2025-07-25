@@ -1410,64 +1410,6 @@ If the documents don't contain enough information to answer the query, please sa
             traceback.print_exc()
 
 
-def handle_rag_query_command(query: str):
-    """
-    Handles RAG query commands in the CLI.
-    
-    This function provides a way to query the RAG system from the command line interface.
-    It loads the RAG manager, performs the query, and displays the results.
-    
-    Args:
-        query: The query string to search for in the RAG system.
-    """
-    try:
-        rag_manager = RAGManager()
-        if rag_manager.get_document_count() == 0:
-            ui_manager.show_error('RAG index is empty. Add documents first.')
-            return
-        results = rag_manager.search(query, k=3)
-        if not results:
-            ui_manager.show_error('No relevant documents found.')
-            return
-        print(Panel(f'[bold cyan]RAG Query:[/bold cyan] {query}', title=
-            '[bold]Retrieval-Augmented Generation Results[/bold]',
-            border_style='cyan'))
-        for i, (doc, score, metadata) in enumerate(results, 1):
-            file_info = metadata.get('file', 'Unknown source')
-            content_preview = doc[:200] + '...' if len(doc) > 200 else doc
-            result_panel = Panel(
-                f"""[dim]Source:[/] {file_info}
-[dim]Relevance:[/] {score:.4f}
-
-{content_preview}"""
-                , title=f'[bold]Result {i}[/bold]', border_style='blue',
-                expand=False)
-            print(result_panel)
-        if ui_manager.get_user_input(
-            '\nGenerate detailed response with AI? (y/n): ').lower() in ['yes',
-            'y']:
-            context = '\n\n'.join([
-                f'Document {i} (Score: {score:.4f}):\n{doc}' for i, (doc,
-                score, _) in enumerate(results, 1)])
-            prompt = f"""Based on the following retrieved documents, please answer the query: "{query}"
-
-Retrieved Documents:
-{context}
-
-Please provide a comprehensive answer based only on the information in the documents above.
-If the documents don't contain enough information to answer the query, please say so."""
-            with ui_manager.show_spinner('AI is generating response...'):
-                response = query_llm(prompt)
-            print(Panel(response, title=
-                '[bold green]AI-Generated Response[/bold green]',
-                border_style='green'))
-    except Exception as e:
-        ui_manager.show_error(f'Error processing RAG query: {e}')
-        if os.getenv('OMNIFORGE_DEBUG'):
-            import traceback
-            traceback.print_exc()
-
-
 def interactive_mode() ->None:
     global last_query, last_response, last_code
     try:

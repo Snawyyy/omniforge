@@ -1,11 +1,31 @@
 from typing import Dict, Any
 import json
+from utils.logger import log_prompt_build
 """
 Prompt Builder - A utility for constructing structured prompts for LLM interactions.
 
 This module provides functions to build context-aware prompts for various operations
 like editing code or planning refactors, ensuring clarity and precision in model inputs.
 """
+
+
+def _format_context_summary(context_summary: Dict[str, Any]) ->str:
+    """Format the project context summary into a readable string for the prompt."""
+    formatted = []
+    if 'file_structure' in context_summary:
+        formatted.append('FILE STRUCTURE:')
+        formatted.append(json.dumps(context_summary['file_structure'],
+            indent=2))
+    if 'key_files' in context_summary:
+        formatted.append('\nKEY FILES WITH SNIPPETS:')
+        for file_path, snippet in context_summary['key_files'].items():
+            formatted.append(f'\n--- {file_path} ---')
+            formatted.append(snippet)
+    if 'project_info' in context_summary:
+        formatted.append('\nPROJECT INFO:')
+        for key, value in context_summary['project_info'].items():
+            formatted.append(f'{key}: {value}')
+    return '\n'.join(formatted)
 
 
 def build_refactor_goal_prompt(goal: str, context_summary: Dict[str, Any]
@@ -52,9 +72,14 @@ RULES:
 - Do not use vague descriptions; be specific about file content or actions.
 - All file paths must be relative to the project root.
 - If you propose creating a new file, include its full intended content.
-- If modifying an existing file, describe the exact changes needed.
+- If modifying an existing file, describe the exact changes needed using unified diff format when applicable.
 - Be concise but comprehensive in your plan.
-- Wrap the final output strictly within JSON format as shown."""
+- Do not include any explanations or markdown in your response - output only valid JSON.
+- Ensure all JSON keys are properly quoted and values are correctly escaped.
+- Wrap the final output strictly within JSON format as shown without any additional text.
+- Do not add any text before or after the JSON object.
+- Your response must be parseable as JSON directly."""
+    log_prompt_build('refactor', goal)
     return prompt
 
 

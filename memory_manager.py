@@ -85,6 +85,22 @@ class MemoryManager:
                     f'[yellow]Warning: Could not add {file_path} to RAG index: {e}[/]'
                     )
 
+    def add_file_to_memory(self, file_path: str) ->None:
+        """
+        Add a file to memory by reading its content and storing it.
+        
+        Args:
+            file_path: The path to the file to add to memory
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self.add_look_data(file_path, content)
+        except Exception as e:
+            print(
+                f'[yellow]Warning: Could not add {file_path} to memory: {e}[/]'
+                )
+
     def get_project_root(self) ->Optional[str]:
         """
         Finds the root directory of the project currently in memory.

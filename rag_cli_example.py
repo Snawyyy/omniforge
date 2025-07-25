@@ -81,58 +81,5 @@ def main():
     parser.print_help()
 
 
-def main():
-    """Main function demonstrating RAG through CLI."""
-    parser = argparse.ArgumentParser(description='RAG CLI Example')
-    parser.add_argument('--query', '-q', type=str, help='Query to search for')
-    parser.add_argument('--add', '-a', type=str, help=
-        'Add a new document to the index')
-    parser.add_argument('--list', '-l', action='store_true', help=
-        'List all documents in the index')
-    parser.add_argument('--clear', '-c', action='store_true', help=
-        'Clear the index')
-    parser.add_argument('--init', '-i', action='store_true', help=
-        'Initialize with sample data')
-    args = parser.parse_args()
-    rag_manager = RAGManager()
-    if args.clear:
-        rag_manager.clear_index()
-        print('Index cleared.')
-        return
-    if args.init:
-        documents = create_sample_data()
-        rag_manager.add_documents(documents)
-        print(f'Added {len(documents)} sample documents to index.')
-        return
-    if args.add:
-        rag_manager.add_documents([args.add])
-        print(f'Added document: {args.add}')
-        return
-    if args.list:
-        if rag_manager.get_document_count() == 0:
-            print(
-                'No documents in index. Use --init to add sample data or --add to add documents.'
-                )
-        else:
-            print(
-                f'Documents in index ({rag_manager.get_document_count()} total):'
-                )
-            for i, meta in enumerate(rag_manager.metadata):
-                print(f"  {i + 1}. {meta['content']}")
-        return
-    if args.query:
-        if rag_manager.get_document_count() == 0:
-            print(
-                'Index is empty. Use --init to add sample data or --add to add documents.'
-                )
-            return
-        results = rag_manager.search(args.query, k=3)
-        print(f"Top 3 results for '{args.query}':")
-        for i, (doc, score, meta) in enumerate(results, 1):
-            print(f'  {i}. [Score: {score:.4f}] {doc}')
-        return
-    parser.print_help()
-
-
 if __name__ == '__main__':
     main()

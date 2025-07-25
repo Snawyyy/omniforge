@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import difflib
 from typing import List, Dict, Any, Tuple
+from memory_manager import get_memory_manager
 
 
 def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
@@ -26,6 +27,7 @@ def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
     """
     step_results = []
     all_succeeded = True
+    memory_manager = get_memory_manager()
     for i, step in enumerate(validated_plan):
         action = step.get('action')
         file_path = step.get('file_path')
@@ -37,6 +39,7 @@ def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, 'w') as f:
                     f.write(content)
+                memory_manager.add_file(file_path)
                 log_execution_step(f'Created file {file_path}')
             elif action == 'MODIFY':
                 if not os.path.exists(file_path):
@@ -49,6 +52,7 @@ def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
             elif action == 'DELETE':
                 if os.path.exists(file_path):
                     os.remove(file_path)
+                    memory_manager.remove_file(file_path)
                     log_execution_step(f'Deleted file {file_path}')
                 else:
                     log_execution_step(
@@ -57,6 +61,8 @@ def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
                 new_path = step.get('new_path')
                 if os.path.exists(file_path) and new_path:
                     shutil.move(file_path, new_path)
+                    memory_manager.remove_file(file_path)
+                    memory_manager.add_file(new_path)
                     log_execution_step(f'Renamed {file_path} to {new_path}')
                 else:
                     raise FileNotFoundError(

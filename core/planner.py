@@ -5,6 +5,8 @@ import logging
 import json
 import re
 from typing import List, Dict, Any, Tuple
+from core.instruction_enhancer import enhance_instruction
+logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
 
@@ -23,8 +25,13 @@ def request_structured_plan(prompt_text: str, expected_keys: Optional[set]=None
     Raises:
         PlanParsingError: If the model's response is not valid JSON or lacks required keys.
     """
+    from core.instruction_enhancer import enhance_instruction
+    enhanced_prompt = enhance_instruction(prompt_text)
     logger.debug('Sending structured plan request to model.')
-    raw_response = send_prompt_to_model(prompt_text)
+    raw_response = send_prompt_to_model(enhanced_prompt)
+    json_match = re.search('\\{.*\\}', raw_response, re.DOTALL)
+    if json_match:
+        raw_response = json_match.group(0)
     try:
         parsed_plan = json.loads(raw_response)
     except json.JSONDecodeError as e:
