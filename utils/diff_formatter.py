@@ -1,6 +1,7 @@
 from typing import List, Union
 import sys
 import difflib
+from typing import Union, List
 
 
 def format_colored_diff(diff_lines: Union[List[str], str], stream=None) ->str:

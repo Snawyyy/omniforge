@@ -4,6 +4,8 @@ from typing import Union
 import difflib
 from typing import List
 import sys
+from typing import Union, List
+from utils.color_formatter import ColorFormatter
 
 
 def generate_diff_text(original_ast: Union[ast.AST, str], modified_ast:
@@ -88,15 +90,16 @@ def show_diff(diff_lines: Union[List[str], str], stream=sys.stdout) ->None:
         lines = diff_lines.splitlines(keepends=True)
     else:
         lines = diff_lines
+    formatter = ColorFormatter()
     for line in lines:
         stripped = line.rstrip('\n')
         if stripped.startswith('+') and not stripped.startswith('+++'):
-            stream.write('\x1b[32m' + line + '\x1b[0m')
+            stream.write(formatter.format_line(line, 'green'))
         elif stripped.startswith('-') and not stripped.startswith('---'):
-            stream.write('\x1b[31m' + line + '\x1b[0m')
+            stream.write(formatter.format_line(line, 'red'))
         elif stripped.startswith('@'):
-            stream.write('\x1b[36m' + line + '\x1b[0m')
+            stream.write(formatter.format_line(line, 'cyan'))
         elif stripped.startswith('+++') or stripped.startswith('---'):
-            stream.write('\x1b[33m' + line + '\x1b[0m')
+            stream.write(formatter.format_line(line, 'yellow'))
         else:
             stream.write(line)

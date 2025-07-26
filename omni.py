@@ -368,9 +368,15 @@ User instruction: {instruction}
 Generate the complete file content now:"""
 
 
-def handle_file_create_command(file_path: str, instruction: str):
+def handle_file_create_command(file_path: str, instruction: str, apply_changes_immediately: bool = True):
     """
     Uses the LLM to generate content for a new file based on an instruction.
+    
+    Args:
+        file_path: The path to the file to create.
+        instruction: The instruction for the AI on how to create the file.
+        apply_changes_immediately: If True, the file is created on disk after confirmation.
+                                   If False, the generated content is returned.
     """
     global last_code
     if os.path.exists(file_path):
@@ -378,7 +384,7 @@ def handle_file_create_command(file_path: str, instruction: str):
             f"File '{file_path}' already exists. Overwrite? (y/n): ").lower(
             ) not in ['yes', 'y']:
             ui_manager.show_error('File creation cancelled.')
-            return
+            return None if not apply_changes_immediately else None
     prompt = _create_prompt_for_file_creation(os.path.basename(file_path),
         instruction)
     with ui_manager.show_spinner(
@@ -392,20 +398,24 @@ def handle_file_create_command(file_path: str, instruction: str):
     if not new_content:
         ui_manager.show_error('AI did not return any content.')
         print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-        return
+        return None if not apply_changes_immediately else None
     print(Panel(new_content, title=
         f'[bold yellow]Proposed content for {file_path}[/]', border_style=
         'yellow'))
-    if ui_manager.get_user_input('Create this file? (y/n): ').lower() in ['yes'
-        , 'y']:
-        try:
-            FileCreator.create(file_path, new_content)
-            last_code = new_content
-            ui_manager.show_success(f'File created successfully: {file_path}')
-        except IOError as e:
-            ui_manager.show_error(f'Error creating file: {e}')
+    if apply_changes_immediately:
+        if ui_manager.get_user_input('Create this file? (y/n): ').lower() in ['yes'
+            , 'y']:
+            try:
+                FileCreator.create(file_path, new_content)
+                last_code = new_content
+                ui_manager.show_success(f'File created successfully: {file_path}')
+            except IOError as e:
+                ui_manager.show_error(f'Error creating file: {e}')
+        else:
+            ui_manager.show_error('File creation cancelled.')
+        return None
     else:
-        ui_manager.show_error('File creation cancelled.')
+        return new_content
 
 
 def look_all_command() ->None:
@@ -628,18 +638,24 @@ Code section to replace (lines {line_start}-{line_end}):
 Generate ONLY the replacement code for the specified lines:"""
 
 
-def handle_file_edit_command(file_path: str, instruction: str):
+def handle_file_edit_command(file_path: str, instruction: str, apply_changes_immediately: bool = True):
     """
     Handles the entire workflow for editing a single file, ensuring full
     project context is loaded before the AI makes any decisions.
     Now supports partial edits within functions.
+    
+    Args:
+        file_path: The path to the file to edit.
+        instruction: The instruction for the AI on how to edit the file.
+        apply_changes_immediately: If True, changes are saved to disk after confirmation.
+                                   If False, the CodeEditor instance with pending changes is returned.
     """
     global last_code
     _load_all_project_files_if_needed()
     resolved_path = resolve_file_path(file_path)
     if not resolved_path:
         ui_manager.show_error(f'File not found: {file_path}')
-        return
+        return None if not apply_changes_immediately else None
     if resolved_path != os.path.abspath(file_path):
         ui_manager.show_success(
             f"Found '{file_path}' in project. Using: {resolved_path}")
@@ -647,7 +663,7 @@ def handle_file_edit_command(file_path: str, instruction: str):
         editor = CodeEditor(resolved_path)
     except (ValueError, FileNotFoundError) as e:
         ui_manager.show_error(str(e))
-        return
+        return None if not apply_changes_immediately else None
     elements = editor.list_elements()
     element_structures = {}
     for elem in elements:
@@ -677,13 +693,13 @@ def handle_file_edit_command(file_path: str, instruction: str):
                 line_range = line_start, line_end
             else:
                 ui_manager.show_error('Invalid line range format')
-                return
+                return None if not apply_changes_immediately else None
         else:
             ui_manager.show_error('Missing line range for partial edit')
-            return
+            return None if not apply_changes_immediately else None
         if element_to_edit not in elements:
             ui_manager.show_error(f"Element '{element_to_edit}' not found")
-            return
+            return None if not apply_changes_immediately else None
         ui_manager.show_success(
             f"AI selected partial edit of '{element_to_edit}' (lines {line_start}-{line_end})"
             )
@@ -702,7 +718,7 @@ def handle_file_edit_command(file_path: str, instruction: str):
             ui_manager.show_error(
                 f"AI identified '{element_to_edit}', which is not a valid element. Aborting."
                 )
-            return
+            return None if not apply_changes_immediately else None
         ui_manager.show_success(f"AI selected '{element_to_edit}' for editing."
             )
         original_snippet = editor.get_source_of(element_to_edit)
@@ -716,7 +732,7 @@ def handle_file_edit_command(file_path: str, instruction: str):
             ui_manager.show_error(
                 f"AI identified '{element_to_edit}', which is not a valid element. Aborting."
                 )
-            return
+            return None if not apply_changes_immediately else None
         ui_manager.show_success(f"AI selected '{element_to_edit}' for editing."
             )
         original_snippet = editor.get_source_of(element_to_edit)
@@ -730,7 +746,7 @@ def handle_file_edit_command(file_path: str, instruction: str):
     if not code_blocks:
         ui_manager.show_error('AI did not return a valid code block.')
         print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-        return
+        return None if not apply_changes_immediately else None
     new_code = code_blocks[0][1]
     success = False
     if edit_type == 'FILE':
@@ -740,33 +756,37 @@ def handle_file_edit_command(file_path: str, instruction: str):
         except SyntaxError as e:
             ui_manager.show_error(f'AI returned invalid Python syntax: {e}')
             print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-            return
+            return None if not apply_changes_immediately else None
     elif edit_type == 'PARTIAL':
         success = editor.replace_partial(element_to_edit, new_code,
             line_start=line_range[0], line_end=line_range[1])
         if not success:
             ui_manager.show_error('Failed to apply partial edit.')
             print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-            return
+            return None if not apply_changes_immediately else None
     else:
         success = editor.replace_element(element_to_edit, new_code)
         if not success:
             ui_manager.show_error(
                 'AI returned invalid code; could not be parsed or applied.')
             print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-            return
+            return None if not apply_changes_immediately else None
     if not (diff := editor.get_diff()):
         ui_manager.show_success('AI made no changes.')
-        return
+        return editor if not apply_changes_immediately else None
     print(Panel(diff, title=
         f'[bold yellow]Proposed Changes for {resolved_path}[/]'))
-    if ui_manager.get_user_input('Apply changes? (y/n): ').lower() in ['yes',
-        'y']:
-        editor.save_changes()
-        last_code = editor.get_modified_source()
-        ui_manager.show_success(f'Changes saved to {resolved_path}.')
+    if apply_changes_immediately:
+        if ui_manager.get_user_input('Apply changes? (y/n): ').lower() in ['yes',
+            'y']:
+            editor.save_changes()
+            last_code = editor.get_modified_source()
+            ui_manager.show_success(f'Changes saved to {resolved_path}.')
+        else:
+            ui_manager.show_error('Changes discarded.')
+        return None
     else:
-        ui_manager.show_error('Changes discarded.')
+        return editor
 
 
 def _create_prompt_for_refactor_plan(instruction: str, memory_context: str
@@ -937,35 +957,11 @@ def _apply_refactor_changes(editors: Dict[str, CodeEditor]) ->None:
 def _create_prompt_for_refactor_action(action_type: str, file_path: str,
     action_details: Dict) ->str:
     """
-    Create a helper to generate prompts for individual 'CREATE' or 'MODIFY' steps
+    Create a helper to generate prompts for individual 'CREATE' steps
     within a refactor plan. This ensures the AI produces code for the specific
     sub-task in the correct context.
     """
-    if action_type == 'MODIFY':
-        element_name = action_details['element_name']
-        reason = action_details['reason']
-        original_code = action_details['original_code']
-        return f"""You are implementing a specific refactoring task as part of a larger plan.
-
-REFACTORING CONTEXT:
-- File: {file_path}
-- Element: {element_name}
-- Reason for change: {reason}
-
-RULES:
-- Provide ONLY the complete updated code for the element
-- Include any necessary imports at the top
-- Ensure the code integrates properly with the rest of the file
-- Maintain the same function/class signature unless the change requires otherwise
-- No explanations outside the code block
-
-Current element code:
-```python
-{original_code}
-```
-
-Generate the updated element code:"""
-    elif action_type == 'CREATE':
+    if action_type == 'CREATE':
         element_name = action_details['element_name']
         description = action_details['description']
         return f"""You are implementing a specific refactoring task as part of a larger plan.
@@ -1009,137 +1005,63 @@ def _process_refactor_action(action: Dict, project_base_path: str, editors:
         return False
     file_path_absolute = os.path.join(project_base_path, file_path_relative)
     action_type = action.get('type', '').upper()
-    prompt, element_name = '', ''
     try:
-        if action_type == 'MODIFY':
-            element_name = action.get('element')
-            reason = action.get('reason')
-            if file_path_relative.endswith('.py'):
-                if file_path_absolute not in editors:
-                    try:
-                        editors[file_path_absolute] = CodeEditor(
-                            file_path_absolute)
-                    except Exception as e:
-                        ui_manager.show_error(
-                            f'Error loading file {file_path_absolute}: {e}')
-                        return False
-                editor = editors[file_path_absolute]
-                original_snippet = editor.get_source_of(element_name)
-                if not original_snippet:
-                    ui_manager.show_error(
-                        f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
-                        )
-                    return False
-                action_details = {'element_name': element_name, 'reason':
-                    reason, 'original_code': original_snippet}
-                prompt = _create_prompt_for_refactor_action('MODIFY',
-                    file_path_relative, action_details)
-        elif action_type == 'PARTIAL':
-            element_name = action.get('element')
-            reason = action.get('reason')
-            line_start = action.get('line_start')
-            line_end = action.get('line_end')
-            if not all([element_name, line_start, line_end]):
-                ui_manager.show_error(
-                    f'PARTIAL action missing required fields. Skipping: {action}'
-                    )
+        if action_type in ['MODIFY', 'PARTIAL']:
+            instruction = action.get('reason') or action.get('description', '')
+            edited_editor = handle_file_edit_command(file_path_absolute, instruction, apply_changes_immediately=False)
+            if edited_editor:
+                editors[file_path_absolute] = edited_editor
+                return True
+            else:
                 return False
-            if file_path_relative.endswith('.py'):
-                if file_path_absolute not in editors:
-                    try:
-                        editors[file_path_absolute] = CodeEditor(
-                            file_path_absolute)
-                    except Exception as e:
-                        ui_manager.show_error(
-                            f'Error loading file {file_path_absolute}: {e}')
-                        return False
-                editor = editors[file_path_absolute]
-                original_snippet = editor.get_element_body_snippet(element_name
-                    , line_start, line_end)
-                if not original_snippet:
-                    original_snippet = editor.get_source_of(element_name)
-                    if not original_snippet:
-                        ui_manager.show_error(
-                            f"Element '{element_name}' in '{file_path_relative}' not found. Skipping."
-                            )
-                        return False
-                full_element_code = editor.get_source_of(element_name)
-                prompt = _create_prompt_for_partial_edit(file_path_relative,
-                    element_name, reason, original_snippet, line_start,
-                    line_end, full_element_code)
         elif action_type == 'CREATE':
             element_name = action.get('element_name')
             description = action.get('description')
-            action_details = {'element_name': element_name, 'description':
-                description}
-            prompt = _create_prompt_for_refactor_action('CREATE',
-                file_path_relative, action_details)
+            if not os.path.exists(file_path_absolute):
+                # If file does not exist, use handle_file_create_command to create it
+                success = handle_file_create_command(file_path_absolute, description, apply_changes_immediately=True)
+                if success is None: # handle_file_create_command returns None on failure or user cancellation
+                    return False
+                return True
+            else:
+                # If file exists, it's a CREATE action for an element within the file
+                action_details = {'element_name': element_name, 'description':
+                    description}
+                prompt = _create_prompt_for_refactor_action('CREATE',
+                    file_path_relative, action_details)
+                with ui_manager.show_spinner(
+                    f"AI: {action_type} on '{element_name or file_path_relative}'..."):
+                    response = query_llm(prompt)
+                code_blocks = extract_code(response)
+                new_content = code_blocks[0][1] if code_blocks else response.strip()
+                if not new_content:
+                    ui_manager.show_error(
+                        f'AI failed to generate content for action: {action}')
+                    print(Panel(response, title="[yellow]AI's Raw Response[/]"))
+                    return False
+                if file_path_absolute not in editors:
+                    try:
+                        editors[file_path_absolute] = CodeEditor(file_path_absolute)
+                    except Exception as e:
+                        ui_manager.show_error(
+                            f'Error loading file {file_path_absolute}: {e}')
+                        return False
+                editor = editors[file_path_absolute]
+                anchor = action.get('anchor_element')
+                position = action.get('position', 'after')
+                if not editor.add_element(new_content, anchor_name=anchor,
+                    before=position == 'before'):
+                    ui_manager.show_error(
+                        f"Failed to apply CREATE change for '{element_name}'.")
+                    print(Panel(new_content, title=
+                        f"[red]Problematic CREATE Code for '{element_name}'[/]",
+                        border_style='red'))
+                    return False
+                return True
         else:
             ui_manager.show_error(
                 f"Invalid action type '{action_type}'. Skipping.")
             return False
-        with ui_manager.show_spinner(
-            f"AI: {action_type} on '{element_name or file_path_relative}'..."):
-            response = query_llm(prompt)
-        code_blocks = extract_code(response)
-        new_content = code_blocks[0][1] if code_blocks else response.strip()
-        if not new_content:
-            ui_manager.show_error(
-                f'AI failed to generate content for action: {action}')
-            print(Panel(response, title="[yellow]AI's Raw Response[/]"))
-            return False
-        if not file_path_relative.endswith('.py'):
-            try:
-                FileCreator.create(file_path_absolute, new_content)
-                ui_manager.show_success(
-                    f"File '{file_path_relative}' created/updated.")
-                return True
-            except IOError as e:
-                ui_manager.show_error(
-                    f"Failed to create file '{file_path_relative}': {e}")
-                return False
-        if file_path_absolute not in editors:
-            try:
-                if not os.path.exists(file_path_absolute):
-                    os.makedirs(os.path.dirname(file_path_absolute),
-                        exist_ok=True)
-                    with open(file_path_absolute, 'w') as f:
-                        f.write('')
-                editors[file_path_absolute] = CodeEditor(file_path_absolute)
-            except Exception as e:
-                ui_manager.show_error(
-                    f'Error loading file {file_path_absolute}: {e}')
-                return False
-        editor = editors[file_path_absolute]
-        if action_type == 'MODIFY':
-            if not editor.replace_element(element_name, new_content):
-                ui_manager.show_error(
-                    f"Failed to apply MODIFY change to '{element_name}'.")
-                print(Panel(new_content, title=
-                    f"[red]Problematic MODIFY Code for '{element_name}'[/]",
-                    border_style='red'))
-                return False
-        elif action_type == 'PARTIAL':
-            if not editor.replace_partial(element_name, new_content,
-                line_start, line_end):
-                ui_manager.show_error(
-                    f"Failed to apply PARTIAL change to '{element_name}'.")
-                print(Panel(new_content, title=
-                    f"[red]Problematic PARTIAL Code for '{element_name}'[/]",
-                    border_style='red'))
-                return False
-        elif action_type == 'CREATE':
-            anchor = action.get('anchor_element')
-            position = action.get('position', 'after')
-            if not editor.add_element(new_content, anchor_name=anchor,
-                before=position == 'before'):
-                ui_manager.show_error(
-                    f"Failed to apply CREATE change for '{element_name}'.")
-                print(Panel(new_content, title=
-                    f"[red]Problematic CREATE Code for '{element_name}'[/]",
-                    border_style='red'))
-                return False
-        return True
     except Exception as e:
         error_msg = (
             f"Exception in {action_type} action on '{file_path_relative}': {str(e)}"
@@ -1504,7 +1426,7 @@ def interactive_mode() ->None:
                 try:
                     file_path, instruction = arg_str.split(' ', 1)
                     handle_file_create_command(file_path.strip('"'),
-                        instruction.strip('"'))
+                        instruction.strip('"'), apply_changes_immediately=True)
                 except (ValueError, IndexError):
                     ui_manager.show_error(
                         'Usage: create <file_path> "<instruction>"')
@@ -1668,7 +1590,7 @@ def main() ->None:
     elif args.command == 'look' and args.args:
         look_command(args.args[0])
     elif args.command == 'edit' and len(args.args) >= 2:
-        handle_file_edit_command(args.args[0], ' '.join(args.args[1:]))
+        handle_file_edit_command(args.args[0], ' '.join(args.args[1:]), apply_changes_immediately=True)
     elif args.command == 'models':
         list_models(args.args)
     elif args.command == 'view' and args.args:

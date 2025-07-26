@@ -214,6 +214,11 @@ class MemoryManager:
                 context += '\n'
         for msg in self.memory.get('chat', []):
             context += f"{msg['role'].capitalize()}: {msg['content']}\n"
+        action_history = self.memory.get('action_history', [])
+        if action_history:
+            context += '\n--- Action History ---\n'
+            for action in action_history:
+                context += f'- {action}\n'
         return context.strip()
 
     def clear_memory(self) ->None:

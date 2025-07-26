@@ -12,7 +12,7 @@ from typing import List, Dict, Optional
 from typing import List, Dict, Any
 
 
-class ActionTracker:
+class GeneralActionTracker:
     """Tracks AI-generated plans and their execution status."""
 
     def __init__(self, project_root: str='.'):
@@ -74,6 +74,7 @@ class ActionTracker:
     def save_actions(self) ->None:
         """Save actions to the tracker file."""
         try:
+            os.makedirs(os.path.dirname(self.tracker_file), exist_ok=True)
             with open(self.tracker_file, 'w') as f:
                 json.dump(self.actions, f, indent=2)
         except Exception as e:

@@ -13,6 +13,7 @@ import difflib
 from typing import List, Optional, Dict, Union, Tuple, Type, Any
 from ast_adapter import ASTAdapter
 import os
+from rich.text import Text
 try:
     import asttokens
     ASTTOKENS_AVAILABLE = True
@@ -509,10 +510,19 @@ class CodeEditor:
             return self.adapter.get_diff()
         else:
             modified_source = self.get_modified_source()
-            return ''.join(difflib.unified_diff(self.source_code.splitlines
-                (keepends=True), modified_source.splitlines(keepends=True),
-                fromfile=f'{self.file_path} (original)', tofile=
-                f'{self.file_path} (modified)'))
+            diff_lines = difflib.unified_diff(self.source_code.splitlines(keepends=True),
+                                              modified_source.splitlines(keepends=True),
+                                              fromfile=f'{self.file_path} (original)',
+                                              tofile=f'{self.file_path} (modified)')
+            colored_diff_lines = []
+            for line in diff_lines:
+                if line.startswith('+'):
+                    colored_diff_lines.append(str(Text(line, style="green")))
+                elif line.startswith('-'):
+                    colored_diff_lines.append(str(Text(line, style="red")))
+                else:
+                    colored_diff_lines.append(line)
+            return ''.join(colored_diff_lines)
 
     def save_changes(self) ->None:
         """Saves the modified source code back to the file."""
