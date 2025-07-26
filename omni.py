@@ -1160,6 +1160,9 @@ def handle_project_refactor_command(instruction: str):
     actions = _get_refactor_plan(instruction)
     if not actions:
         return
+    refactor_plan = {'instruction': instruction, 'actions': actions,
+        'timestamp': datetime.now().isoformat()}
+    memory_manager.add_refactor_plan(refactor_plan)
     plan = {'actions': actions}
     if not _display_and_confirm_plan(plan):
         return
@@ -1236,6 +1239,12 @@ def handle_project_refactor_command(instruction: str):
             ui_manager.show_error(error_msg)
             failed_actions.append({'index': i, 'action': action, 'error':
                 error_msg, 'exception': str(e)})
+    refactor_result = {'instruction': instruction, 'total_actions':
+        total_actions, 'successful_actions': successful_actions,
+        'failed_actions': failed_actions, 'timestamp': datetime.now().
+        isoformat(), 'success': successful_actions > 0 and 
+        successful_actions == total_actions}
+    memory_manager.add_refactor_result(refactor_result)
     if successful_actions == 0:
         ui_manager.show_error('No actions were successfully executed.')
     elif successful_actions < total_actions:
@@ -1512,7 +1521,6 @@ def interactive_mode() ->None:
                     ui_manager.show_error('Usage: refactor "<instruction>"')
                 else:
                     handle_project_refactor_command(arg_str.strip('"'))
-            
             elif command == 'commit':
                 handle_commit_command()
             elif command == 'models':
@@ -1663,14 +1671,25 @@ def main() ->None:
         handle_file_edit_command(args.args[0], ' '.join(args.args[1:]))
     elif args.command == 'models':
         list_models(args.args)
+    elif args.command == 'view' and args.args:
+        handle_file_view_command(args.args[0])
+    elif args.command == 'action-history':
+        from commands.action_history_handler import handle_action_history_command
+        handle_action_history_command()
     else:
         interactive_mode()
 
 
 def refresh_status_panel(personality_name: str) ->None:
+    action_count = 0
+    try:
+        from core.action_tracker import action_tracker
+        action_count = len(action_tracker.action_memory.get_actions())
+    except:
+        pass
     ui_manager.display_status_panel(personality_name, current_backend,
         current_model, len(memory_manager.memory.get('chat', [])), len(
-        memory_manager.memory.get('look', [])))
+        memory_manager.memory.get('look', [])), action_count)
 
 
 if __name__ == '__main__':

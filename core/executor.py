@@ -6,15 +6,18 @@ import os
 import difflib
 from typing import Tuple
 from memory_manager import get_memory_manager
+from typing import List, Dict, Any, Tuple
+from core.action_tracker import ActionTracker
 
 
-def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
-    List[Dict[str, Any]]]:
+def execute_all_step(validated_plan: List[Dict[str, Any]], action_tracker:
+    ActionTracker=None) ->Tuple[bool, List[Dict[str, Any]]]:
     """
     Execute a list of validated transformation steps across multiple files.
 
     Args:
         validated_plan: A list of step dictionaries containing file paths and operations.
+        action_tracker: Optional ActionTracker to record step execution status.
 
     Returns:
         A tuple containing:
@@ -24,6 +27,8 @@ def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
     step_results = []
     all_succeeded = True
     memory_manager = get_memory_manager()
+    if action_tracker:
+        action_tracker.record_execution_start(validated_plan)
     for i, step in enumerate(validated_plan):
         action = step.get('action')
         file_path = step.get('file_path')
@@ -65,6 +70,8 @@ def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
                         f'Could not rename {file_path} to {new_path}')
             else:
                 raise ValueError(f'Unknown action type: {action}')
+            if action_tracker:
+                action_tracker.record_step_success(i, step)
         except Exception as e:
             all_succeeded = False
             step_result['success'] = False
@@ -72,7 +79,11 @@ def execute_all_step(validated_plan: List[Dict[str, Any]]) ->Tuple[bool,
             log_execution_step(
                 f'Error executing step {i} ({action} on {file_path}): {str(e)}'
                 )
+            if action_tracker:
+                action_tracker.record_step_failure(i, step, str(e))
         step_results.append(step_result)
+    if action_tracker:
+        action_tracker.record_completion(all_succeeded)
     return all_succeeded, step_results
 
 

@@ -1,0 +1,152 @@
+The New Paradigm: The Adaptive Execution Loop
+
+Instead of generating a rigid, multi-step JSON plan that is executed linearly, we introduce a more dynamic, cyclical process.
+
+Here’s the proposed Adaptive Execution Loop:
+
+    Decomposition (High-Level Plan):
+
+        The user provides a high-level goal (e.g., "Add a caching layer to the user authentication endpoint").
+
+        The AI's first task is to create a strategic, high-level plan. This is not a detailed list of code changes but a conceptual to-do list.
+
+        Example Plan:
+        Generated code
+
+      
+1. Identify the authentication endpoint function.
+2. Implement a simple in-memory cache.
+3. Modify the endpoint function to use the cache.
+4. Add a test to verify the cache is working.
+
+    
+
+IGNORE_WHEN_COPYING_START
+
+        Use code with caution.
+        IGNORE_WHEN_COPYING_END
+
+    Action Selection & Tool Execution:
+
+        The agent picks the first task from its high-level plan (e.g., "Identify the authentication endpoint function").
+
+        It then decides which tool is best suited for this specific task. It might choose grep or list_elements to find the relevant function.
+
+        It executes the tool.
+
+    Observation & Reflection (The Critical Step):
+
+        On Success: The tool returns a successful result (e.g., "Found function login_user in routes.py"). The agent updates its working context with this new information and proceeds to the next high-level step.
+
+        On Failure: The tool fails (e.g., syntax error in generated code, file not found, command execution error). The execution loop does not halt. Instead, it captures the detailed error output (the traceback, the linter error, the stderr).
+
+    Self-Correction & Re-Planning:
+
+        The captured error becomes the most critical piece of new information.
+
+        The agent loop constructs a new "self-correction" prompt to the LLM. This prompt contains:
+
+            The original high-level goal.
+
+            The high-level plan.
+
+            The specific action that was attempted.
+
+            The exact error message that was produced.
+
+            The instruction: "Your last action failed with the error above. Analyze the error and determine the best next step. You can retry the action, try a different tool to fix the problem, or modify your high-level plan. Generate the next single action to take."
+
+    Adaptation & Continuation:
+
+        The LLM, now equipped with the context of its own failure, can make an intelligent new decision.
+
+        It might decide to use a different tool (edit_file to fix a syntax error), change its approach (add a missing import it forgot), or even ask the user for clarification if it's truly stuck.
+
+        The loop then continues with this new, adapted action.
+
+Scenario Walkthrough: AI Self-Correction
+
+Let's see how this works in practice.
+
+Goal: "Add a function to services.py that gets the user's name from their ID, but make sure it handles database errors."
+
+    High-Level Plan:
+
+        Add get_user_name(user_id) function to services.py.
+
+        Ensure it has a try/except block for DatabaseError.
+
+    Action & Execution (Attempt 1):
+
+        Action: The AI decides to implement the function.
+
+        Tool: It calls the edit_file tool with the following new code for services.py:
+        Generated python
+
+      
+def get_user_name(user_id):
+    # new function
+    try:
+        user = db.query("SELECT name FROM users WHERE id = ?", user_id)
+        return user.name
+    except DatabaseError as e:
+        log.error(f"DB error for {user_id}: {e}")
+        return None
+
+    
+
+IGNORE_WHEN_COPYING_START
+
+        Use code with caution. Python
+        IGNORE_WHEN_COPYING_END
+
+        Observation (Failure): The system tries to validate this code and the ASTAdapter or a linter fails.
+
+        Error Captured: NameError: name 'DatabaseError' is not defined.
+
+    Self-Correction Prompt: The agent sends this to the LLM:
+
+        "Your goal is to add a user function that handles database errors. You attempted to add a function to services.py, but it failed with the error: NameError: name 'DatabaseError' is not defined. Analyze this error and decide the next action."
+
+    Adaptation & Execution (Attempt 2):
+
+        AI Reasoning: "The error NameError means DatabaseError was not imported. I need to fix this before adding the function."
+
+        New Action: The AI decides its next action is to add an import.
+
+        Tool: It calls the edit_file tool again, but this time its instruction is to add from database import DatabaseError to the top of services.py.
+
+    Continuation:
+
+        Observation (Success): The import is added successfully.
+
+        Next Action: The agent now returns to its original plan. It retries adding the get_user_name function. This time, the code is valid because the dependency is met. The process continues.
+
+Key Implementation Changes for omni.py
+
+To achieve this, you would need to:
+
+    Refactor the Main Loop: The core of omni.py's interactive_mode would become this adaptive execution loop, which manages the state of the high-level plan and the agent's working context.
+
+    Change the refactor Prompt: The _create_prompt_for_refactor_plan function would be changed. Instead of asking for a rigid JSON of MODIFY/CREATE actions, it would ask for a high-level, natural language list of strategic goals.
+
+    Standardize Tool Outputs: All the action-oriented functions (handle_file_edit_command, FileCreator.create, editor.delete_element) must be wrapped into "tools" that return a standardized object, like:
+    Generated python
+
+      
+# On success
+{'success': True, 'output': 'File modified successfully.'}
+
+# On failure
+{'success': False, 'error': 'SyntaxError: invalid syntax on line 42'}
+
+    
+
+IGNORE_WHEN_COPYING_START
+
+    Use code with caution. Python
+    IGNORE_WHEN_COPYING_END
+
+    Implement the Self-Correction Prompt Builder: A new function is needed to dynamically create the prompt that includes the context of the failure.
+
+This architecture would make omni significantly more robust and intelligent. It would no longer be brittle and fail on the first error. Instead, errors would become a source of learning and adaptation, allowing the agent to debug its own process and ultimately succeed in more complex tasks.

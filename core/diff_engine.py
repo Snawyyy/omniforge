@@ -7,13 +7,14 @@ import sys
 
 
 def generate_diff_text(original_ast: Union[ast.AST, str], modified_ast:
-    Union[ast.AST, str]) ->str:
+    Union[ast.AST, str], colored: bool=False) ->str:
     """
     Generate unified diff text between original and modified ASTs or source code strings.
 
     Args:
         original_ast: Original AST object or source code string
         modified_ast: Modified AST object or source code string
+        colored: Whether to generate colored output for terminal display
 
     Returns:
         Unified diff text as a string
@@ -29,7 +30,21 @@ def generate_diff_text(original_ast: Union[ast.AST, str], modified_ast:
     diff = difflib.unified_diff(original_source.splitlines(keepends=True),
         modified_source.splitlines(keepends=True), fromfile='original',
         tofile='modified')
-    return ''.join(diff)
+    diff_text = ''.join(diff)
+    if colored:
+        colored_lines = []
+        for line in diff_text.splitlines(keepends=True):
+            stripped = line.rstrip('\n')
+            if stripped.startswith('+') and not stripped.startswith('+++'):
+                colored_lines.append('\x1b[32m' + line + '\x1b[0m')
+            elif stripped.startswith('-') and not stripped.startswith('---'):
+                colored_lines.append('\x1b[31m' + line + '\x1b[0m')
+            elif stripped.startswith('@'):
+                colored_lines.append('\x1b[36m' + line + '\x1b[0m')
+            else:
+                colored_lines.append(line)
+        return ''.join(colored_lines)
+    return diff_text
 
 
 """
@@ -63,7 +78,7 @@ def show_diff(diff_lines: Union[List[str], str], stream=sys.stdout) ->None:
     Display a colorized diff in the terminal.
 
     Adds colors to added/deleted lines for better readability.
-    Green for additions (+), red for deletions (-), and white for context.
+    Green for additions (+), red for deletions (-), yellow for headers, and white for context.
 
     Args:
         diff_lines: A list of diff lines or a single diff string.
@@ -81,5 +96,7 @@ def show_diff(diff_lines: Union[List[str], str], stream=sys.stdout) ->None:
             stream.write('\x1b[31m' + line + '\x1b[0m')
         elif stripped.startswith('@'):
             stream.write('\x1b[36m' + line + '\x1b[0m')
+        elif stripped.startswith('+++') or stripped.startswith('---'):
+            stream.write('\x1b[33m' + line + '\x1b[0m')
         else:
             stream.write(line)

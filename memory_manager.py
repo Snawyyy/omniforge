@@ -2,6 +2,8 @@ import json
 import os
 from typing import List, Dict, Optional
 from rag_manager import RAGManager
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 
 
 class MemoryManager:
@@ -17,12 +19,14 @@ class MemoryManager:
             with open(self.memory_file, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
-            default = {'chat': [], 'look': []}
+            default = {'chat': [], 'look': [], 'actions': [],
+                'refactor_plans': []}
             self.save_memory(default)
             return default
         except json.JSONDecodeError:
             print('[yellow]Invalid memory file. Resetting.[/]')
-            return {'chat': [], 'look': []}
+            return {'chat': [], 'look': [], 'actions': [], 'refactor_plans': []
+                }
 
     def save_memory(self, memory: Optional[Dict[str, List]]=None) ->None:
         if memory is None:
@@ -51,6 +55,59 @@ class MemoryManager:
             content: The message content
         """
         self.add_message(role, content)
+
+    def add_action(self, action_type: str, details: Dict) ->None:
+        """
+        Add an action to the action history and save immediately.
+        
+        Args:
+            action_type: The type of action (e.g., 'edit', 'create', 'refactor')
+            details: Dictionary containing action details
+        """
+        action_record = {'type': action_type, 'timestamp': datetime.now().
+            isoformat(), 'details': details}
+        self.memory.setdefault('actions', []).append(action_record)
+        self.save_memory()
+
+    def get_recent_actions(self, limit: int=10) ->List[Dict]:
+        """
+        Get the most recent actions from the action history.
+        
+        Args:
+            limit: Maximum number of actions to return
+            
+        Returns:
+            List of recent action records
+        """
+        actions = self.memory.get('actions', [])
+        return actions[-limit:] if len(actions) > limit else actions
+
+    def add_refactor_plan(self, plan: Dict, result: Optional[Dict]=None
+        ) ->None:
+        """
+        Store a refactor plan and its result in memory.
+        
+        Args:
+            plan: The refactor plan dictionary
+            result: Optional result of the refactor execution
+        """
+        plan_record = {'timestamp': datetime.now().isoformat(), 'plan':
+            plan, 'result': result}
+        self.memory.setdefault('refactor_plans', []).append(plan_record)
+        self.save_memory()
+
+    def get_recent_refactor_plans(self, limit: int=5) ->List[Dict]:
+        """
+        Get the most recent refactor plans from memory.
+        
+        Args:
+            limit: Maximum number of plans to return
+            
+        Returns:
+            List of recent refactor plan records
+        """
+        plans = self.memory.get('refactor_plans', [])
+        return plans[-limit:] if len(plans) > limit else plans
 
     def add_look_data(self, file_path: str, content: str) ->None:
         """
@@ -116,13 +173,18 @@ class MemoryManager:
                 return item.get('file')
         return None
 
-    def get_memory_context(self) ->str:
+    def get_memory_context(self, selected_files: Optional[List[str]]=None
+        ) ->str:
         """
         Dynamically builds the context using RAG and chat history.
 
         It retrieves relevant file content from the RAG index based on the latest
         user query, includes project manifests for directories, and appends the
-        recent chat history.
+        recent chat history. Can optionally filter to only include specified files.
+
+        Args:
+            selected_files: Optional list of file paths to include in context.
+                           If None, includes all files in memory.
         """
         context = ''
         for look in self.memory.get('look', []):
@@ -131,6 +193,12 @@ class MemoryManager:
                 content = look.get('content', '')
                 context += (
                     f'--- Project Manifest for {path} ---\n{content}\n\n')
+        if selected_files is not None:
+            for look in self.memory.get('look', []):
+                path = look.get('file')
+                if path and os.path.isfile(path) and path in selected_files:
+                    content = look.get('content', '')
+                    context += f'--- File: {path} ---\n{content}\n\n'
         last_user_message = next((msg['content'] for msg in reversed(self.
             memory.get('chat', [])) if msg['role'] == 'user'), None)
         if last_user_message:
@@ -139,15 +207,18 @@ class MemoryManager:
                 context += '--- Relevant context from RAG ---\n'
                 for doc, score, meta in rag_results:
                     file_path = meta.get('file', 'Unknown source')
-                    context += f'Source: {file_path} (Score: {score:.4f})\n'
-                    context += f'Content: {doc}\n---\n'
+                    if selected_files is None or file_path in selected_files:
+                        context += (
+                            f'Source: {file_path} (Score: {score:.4f})\n')
+                        context += f'Content: {doc}\n---\n'
                 context += '\n'
         for msg in self.memory.get('chat', []):
             context += f"{msg['role'].capitalize()}: {msg['content']}\n"
         return context.strip()
 
     def clear_memory(self) ->None:
-        self.memory = {'chat': [], 'look': []}
+        self.memory = {'chat': [], 'look': [], 'actions': [],
+            'refactor_plans': []}
         self.save_memory()
         self.rag_manager.clear_index()
 
@@ -163,3 +234,62 @@ class MemoryManager:
             List of (document_content, score, metadata) tuples
         """
         return self.rag_manager.search(query, k)
+
+    def add_refactor_result(self, result: Dict) ->None:
+        """
+        Add a refactor result to the memory.
+        
+        Args:
+            result: Dictionary containing the refactor result details.
+        """
+        self.memory.setdefault('refactor_results', []).append(result)
+        self.save_memory()
+
+
+class ActionMemoryManager:
+    """Manages memory for tracking refactor actions and their execution status."""
+
+    def __init__(self):
+        self.actions: List[Dict[str, Any]] = []
+
+    def add_action(self, step: Dict[str, Any], status: str='pending', error:
+        Optional[str]=None) ->None:
+        """
+        Add an action to memory.
+        
+        Args:
+            step: The refactor step dictionary
+            status: Execution status ("pending", "success", "failed")
+            error: Error message if failed
+        """
+        action_entry = {'step': step.copy(), 'status': status, 'error':
+            error, 'timestamp': self._get_timestamp()}
+        self.actions.append(action_entry)
+
+    def update_action_status(self, step_index: int, status: str, error:
+        Optional[str]=None) ->None:
+        """
+        Update the status of an existing action.
+        
+        Args:
+            step_index: Index of the step in the plan
+            status: New status ("success", "failed")
+            error: Error message if failed
+        """
+        if 0 <= step_index < len(self.actions):
+            self.actions[step_index]['status'] = status
+            if error:
+                self.actions[step_index]['error'] = error
+            self.actions[step_index]['timestamp'] = self._get_timestamp()
+
+    def get_actions(self) ->List[Dict[str, Any]]:
+        """Get all tracked actions."""
+        return self.actions.copy()
+
+    def clear_actions(self) ->None:
+        """Clear all actions from memory."""
+        self.actions.clear()
+
+    def _get_timestamp(self) ->str:
+        """Get current timestamp."""
+        return datetime.now().isoformat()

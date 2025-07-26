@@ -5,6 +5,11 @@ from core.diff_engine import show_diff
 from core.model_client import send_prompt_to_model
 from core.prompt_builder import build_edit_prompt
 import os
+from typing import Optional
+from core.diff_engine import generate_diff_text, show_diff
+from utils.io_helpers import confirm_change, safe_write_file
+import re
+from typing import List, Dict
 
 
 def handle_edit_command(file_path: str, element_name: str, instruction: str,
@@ -36,27 +41,61 @@ def handle_edit_command(file_path: str, element_name: str, instruction: str,
     if not original_source:
         print(f"[ERROR] Could not retrieve source for '{element_name}'")
         return False
+    referenced_files = _extract_referenced_files(instruction)
+    additional_context = {}
+    for ref_file in referenced_files:
+        if os.path.exists(ref_file):
+            try:
+                with open(ref_file, 'r') as f:
+                    additional_context[ref_file] = f.read()
+            except Exception as e:
+                print(f'[DEBUG] Could not read referenced file {ref_file}: {e}'
+                    )
     context = {'file_path': file_path, 'element_name': element_name,
-        'original_source': original_source, 'instruction': instruction}
-    prompt = build_edit_prompt(context)
+        'original_source': original_source, 'instruction': instruction,
+        'additional_context': additional_context}
+    try:
+        prompt = build_edit_prompt(context)
+    except Exception as e:
+        print(f'[ERROR] Failed to construct prompt for model: {e}')
+        return False
     if not prompt:
         print('[ERROR] Failed to construct prompt for model.')
         return False
-    model_response = send_prompt_to_model(prompt, model)
+    try:
+        model_response = send_prompt_to_model(prompt, model)
+    except Exception as e:
+        print(f'[ERROR] Failed to get response from model: {e}')
+        return False
     if not model_response:
         print('[ERROR] No response received from model.')
         return False
-    success = editor.replace_element(element_name, model_response)
+    try:
+        success = editor.replace_element(element_name, model_response)
+    except Exception as e:
+        print(f'[ERROR] Failed to apply changes to the AST: {e}')
+        return False
     if not success:
         print('[ERROR] Failed to apply changes to the AST.')
         return False
-    diff_lines = editor.get_diff()
+    try:
+        diff_lines = editor.get_diff()
+    except Exception as e:
+        print(f'[ERROR] Failed to generate diff: {e}')
+        return False
     if not diff_lines:
         print('[INFO] No changes detected.')
         return False
-    show_diff(diff_lines)
-    if not confirm_change(diff_lines):
-        print('[INFO] Edit canceled by user.')
+    try:
+        show_diff(diff_lines)
+    except Exception as e:
+        print(f'[ERROR] Failed to display diff: {e}')
+    try:
+        if not confirm_change(diff_lines):
+            print('[INFO] Edit canceled by user.')
+            return False
+    except Exception as e:
+        print(f'[ERROR] Failed to confirm changes: {e}')
         return False
     try:
         editor.save_changes()
@@ -66,3 +105,38 @@ def handle_edit_command(file_path: str, element_name: str, instruction: str,
     except Exception as e:
         print(f'[ERROR] Failed to save changes: {e}')
         return False
+
+
+def _extract_referenced_files(instruction: str) ->List[str]:
+    """Extract file paths referenced in the instruction."""
+    patterns = ['"([^"]*\\.[^"]+)"', "'([^']*\\.[^']+)'",
+        '(\x08[\\w./\\-]+\\.[\\w]+\x08)']
+    files = []
+    for pattern in patterns:
+        matches = re.findall(pattern, instruction)
+        if matches:
+            if isinstance(matches[0], str):
+                files.extend(matches)
+            else:
+                files.extend([m[0] for m in matches])
+    valid_files = []
+    for f in files:
+        if '.' in f and not f.startswith(('http', 'www')):
+            valid_files.append(f)
+    return list(set(valid_files))
+
+
+def _extract_referenced_files(instruction: str) ->list:
+    """Extract file paths referenced in the instruction."""
+    patterns = ['"([^"]*\\.[a-zA-Z]+)"', "'([^']*\\\\.[a-zA-Z]+)'",
+        '(\\b[\\w./\\-]+\\.[a-zA-Z]+\\b)']
+    files = []
+    for pattern in patterns:
+        matches = re.findall(pattern, instruction)
+        files.extend(matches if isinstance(matches[0], str) else [m[0] for
+            m in matches])
+    valid_files = []
+    for f in files:
+        if '.' in f and not f.startswith(('http', 'www')):
+            valid_files.append(f)
+    return list(set(valid_files))

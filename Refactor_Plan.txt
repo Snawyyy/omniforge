@@ -1,0 +1,217 @@
+Phase 1: Foundational Refactoring - Building the Agent's "Toolbelt"
+
+The goal of this phase is to transform omni.py's internal functions into a set of standardized, callable "tools" that the agent can use.
+
+Step 1.1: Define the Tool Protocol
+Every tool must adhere to a strict contract. It must have:
+
+    A unique name (e.g., read_file).
+
+    A description for the LLM to understand its purpose.
+
+    A definition of its parameters (e.g., file_path: str).
+
+    A standardized return format: a tuple of (success: bool, result: Union[str, Dict, List]). If success is False, the result must be a descriptive error message string.
+
+Step 1.2: Create the Tool Registry
+In a new file, tools.py, create a central TOOL_REGISTRY. This will be a dictionary mapping tool names to their implementation and schema.
+Generated python
+
+      
+# tools.py
+
+def read_file(file_path: str) -> tuple[bool, str]:
+    # ... implementation ...
+    try:
+        with open(file_path, 'r') as f:
+            return True, f.read()
+    except Exception as e:
+        return False, f"Error reading file {file_path}: {e}"
+
+TOOL_REGISTRY = {
+    "read_file": {
+        "function": read_file,
+        "description": "Reads the entire content of a specified file.",
+        "parameters": {
+            "file_path": "The relative or absolute path to the file to be read."
+        }
+    },
+    # ... other tools will be registered here
+}
+
+    
+
+IGNORE_WHEN_COPYING_START
+Use code with caution. Python
+IGNORE_WHEN_COPYING_END
+
+Step 1.3: Refactor Existing Logic into Tools
+Go through omni.py and extract core logic into discrete tools in tools.py.
+
+    read_file: From look_command.
+
+    write_file: A new, powerful tool that combines handle_file_create_command and editor.save_changes(). It should create a file if it doesn't exist and overwrite it if it does.
+
+    list_files: From generate_project_manifest. It should return a list of file paths.
+
+    list_code_elements: From editor.list_elements(). Takes a file_path.
+
+    get_code_for_element: From editor.get_source_of().
+
+    edit_code_element: A surgical tool combining replace_element and replace_partial. It should take a file_path, element_name, and new_code.
+
+    run_bash_command: A new, critical tool for general-purpose actions like grep or running tests. This tool must have a user confirmation step for safety.
+
+Phase 2: The Agent's Core - State and Execution Loop
+
+This phase involves creating the agent's "brain" and its main operational cycle.
+
+Step 2.1: Create the AgentState Manager
+Create a class to manage the agent's memory throughout its lifecycle.
+Generated python
+
+      
+# agent_state.py
+
+class AgentState:
+    def __init__(self, goal: str):
+        self.goal = goal
+        self.high_level_plan = []
+        self.completed_steps = []
+        self.working_context = {}  # "Scratchpad" for file contents, tool outputs, etc.
+        self.last_action_result = None
+
+    
+
+IGNORE_WHEN_COPYING_START
+Use code with caution. Python
+IGNORE_WHEN_COPYING_END
+
+Step 2.2: Build the Main Execution Loop
+In a new agent.py file, create the orchestrator. This loop is the new heart of the agent.
+Generated python
+
+      
+# agent.py
+
+from agent_state import AgentState
+from tools import TOOL_REGISTRY
+# ... other imports
+
+MAX_ITERATIONS = 20
+
+def execute(goal: str):
+    state = AgentState(goal)
+    
+    # Initial planning step
+    state.high_level_plan = _get_initial_plan_from_llm(state)
+    
+    for i in range(MAX_ITERATIONS):
+        if is_plan_complete(state):
+            print("Goal achieved!")
+            return
+
+        # 1. Decide next action based on state (including previous failures)
+        action = _get_next_action_from_llm(state)
+        
+        # 2. Execute the action
+        tool_name = action.get("tool")
+        tool_args = action.get("args")
+        
+        if tool_name in TOOL_REGISTRY:
+            print(f"[Action]: Running {tool_name} with args: {tool_args}")
+            tool_func = TOOL_REGISTRY[tool_name]["function"]
+            
+            # Critical: Capture success and result
+            success, result = tool_func(**tool_args)
+            state.last_action_result = {"success": success, "output": result}
+
+            if success:
+                # Update working context with the successful result
+                state.working_context[f"{tool_name}_result"] = result
+            else:
+                print(f"[Failure]: {result}") # Log failure for the user
+        else:
+            state.last_action_result = {"success": False, "output": f"Tool '{tool_name}' not found."}
+
+    print("Max iterations reached. Unable to complete goal.")
+
+    
+
+IGNORE_WHEN_COPYING_START
+Use code with caution. Python
+IGNORE_WHEN_COPYING_END
+Phase 3: AI Integration - Prompt Engineering
+
+This is where we craft the specific instructions for the LLM.
+
+Step 3.1: Create the Initial Planning Prompt
+This prompt takes the user's high-level goal and asks for a strategic plan, not code.
+
+    Prompt for Initial Plan:
+    "You are an expert software architect. Based on the user's goal, create a high-level, strategic plan of no more than 5-7 steps. Do not write code. Describe the logical steps needed to achieve the goal. Goal: {user_goal}"
+
+Step 3.2: Create the Core Action Prompt
+This is the most important prompt, used in every loop. It must be dynamically constructed based on the agent's state.
+
+    Prompt for Next Action:
+    *"You are an autonomous AI agent. Your overall goal is: {goal}.
+
+    High-Level Plan:
+    {formatted_plan_with_status}
+
+    Available Tools:
+    {formatted_tool_list_with_descriptions}
+
+    Current Context / Scratchpad:
+    {summary_of_working_context}
+
+    Previous Action Result:
+    {if last_action_failed}
+    Your last action failed with the error: '{error_message}'. Analyze this error and decide on the best step to fix it or work around it.
+    {else}
+    Your last action was successful. Decide the next step to progress on the plan.
+    {end_if}
+
+    Based on all the above, what is the single next tool you should use? Respond with ONLY a JSON object in the format: {"tool": "tool_name", "args": {"param1": "value1"}}"*
+
+Phase 4: Integration into omni.py
+
+Finally, we wire the new agent into the main CLI.
+
+Step 4.1: Create a New agent Command
+Add a new command to omni.py's command handler.
+Generated python
+
+      
+# omni.py in interactive_mode
+
+elif command == 'agent' or command == 'do':
+    if not arg_str:
+        ui_manager.show_error('Usage: agent "<your high-level goal>"')
+    else:
+        from agent import execute
+        execute(arg_str.strip('"'))
+
+    
+
+IGNORE_WHEN_COPYING_START
+Use code with caution. Python
+IGNORE_WHEN_COPYING_END
+
+Step 4.2: User Experience and Logging
+Ensure the agent's actions are transparent. The execute loop in agent.py should include rich print statements:
+
+    [Plan]: AI has formulated the following plan...
+
+    [Thinking]: Deciding on the next action...
+
+    [Action]: Executing read_filewithfile_path='src/main.py'...
+
+    [Success]: File read successfully. Added to context.
+
+    [Failure]: Tool edit_code_element failed. Error: SyntaxError...
+
+    [Self-Correction]: Analyzing failure to determine next step...
+
+By following these phases, you will systematically refactor omni.py from a command-based tool into a resilient, adaptive agent that can strategically reason about its goals and recover from its own errors.

@@ -6,6 +6,13 @@ import json
 import re
 from typing import List, Tuple
 from core.instruction_enhancer import enhance_instruction
+from utils.logger import log_planning_step
+from core.prompt_builder import build_refactor_goal_prompt
+from typing import Dict, Any, List
+from utils.logger import log_planning_activity
+from core.model_client import query_model_safe
+from core.prompt_builder import build_file_view_prompt
+from utils.logger import log_planning_complete
 logger = logging.getLogger(__name__)
 logger = logging.getLogger(__name__)
 
@@ -45,6 +52,76 @@ def request_structured_plan(prompt_text: str, expected_keys: Optional[set]=None
                 f'Missing required keys in plan: {missing_keys}')
     logger.debug('Structured plan successfully parsed.')
     return parsed_plan
+
+
+def plan_file_view_action(user_request: str, project_context: Dict[str, Any]
+    ) ->Dict[str, Any]:
+    """
+    Plans a file viewing action based on user request and project context.
+    
+    Args:
+        user_request: Natural language request for files to view
+        project_context: Current project metadata and structure
+        
+    Returns:
+        Dict containing the planned file viewing action
+    """
+    prompt = build_file_view_prompt(user_request, project_context)
+    log_planning_activity('file_view', user_request)
+    response = query_model_safe(prompt)
+    if not response:
+        return {'error': 'Failed to generate file view plan'}
+    try:
+        plan = json.loads(response)
+        return {'action': 'view_files', 'files': plan.get('files', []),
+            'reasoning': plan.get('reasoning', '')}
+    except json.JSONDecodeError:
+        return {'error': 'Invalid response format from model'}
+
+
+def plan_file_view_action(user_request: str, project_context: Dict[str, Any]
+    ) ->Dict[str, Any]:
+    """
+    Plan a file viewing action based on user request and project context.
+    
+    Args:
+        user_request: User's request for files to view
+        project_context: Current project context information
+        
+    Returns:
+        A structured plan for file viewing actions
+    """
+    log_planning_step('file_view', user_request)
+    prompt = f"""You are an expert software architect tasked with planning file viewing actions.
+Given the following user request and project context, generate a structured plan to view relevant files.
+
+USER REQUEST:
+{user_request}
+
+PROJECT CONTEXT:
+{project_context}
+
+OUTPUT FORMAT (JSON SCHEMA):
+{{
+  "steps": [
+    {{
+      "type": "VIEW",
+      "file": "<relative_file_path>",
+      "description": "<reason for viewing this file>",
+      "details": "<specific content or sections to focus on>"
+    }}
+  ]
+}}
+
+RULES:
+- Only include files that are directly relevant to the user's request
+- Each step must clearly define which file to view and why
+- Be specific about content or sections of interest
+- Do not include files not mentioned in the project context
+- Limit to maximum 5 most relevant files
+- Output only valid JSON as shown in the schema
+- Do not add any explanations outside the JSON structure"""
+    return {'steps': []}
 
 
 def validate_steps(steps: List[Dict[str, Any]]) ->Tuple[bool, List[str]]:
@@ -92,3 +169,62 @@ def validate_steps(steps: List[Dict[str, Any]]) ->Tuple[bool, List[str]]:
                     errors.append(
                         f'Step {i} has invalid {path_key} format: {path}')
     return len(errors) == 0, errors
+
+
+def plan_file_view_action(user_request: str, context_summary: Dict[str, Any]
+    ) ->Dict[str, Any]:
+    """
+    Plans a file viewing action based on user request and project context.
+    
+    Args:
+        user_request: User's natural language request for files to view
+        context_summary: Current project context including file structure
+        
+    Returns:
+        A structured plan for which files to present to the user
+    """
+    formatted_context = _format_file_view_context(context_summary)
+    prompt = f"""You are an expert software analyst tasked with identifying the most relevant files to show a developer.
+
+Given the following user request and project context, generate a list of files that would be most helpful to view.
+
+USER REQUEST:
+{user_request}
+
+PROJECT CONTEXT:
+{formatted_context}
+
+OUTPUT FORMAT (JSON SCHEMA):
+{{
+  "files_to_show": [
+    {{
+      "file_path": "<relative_file_path>",
+      "reason": "<why this file is relevant>"
+    }}
+  ]
+}}
+
+RULES:
+- Include only files that directly relate to the user's request
+- Limit your response to at most 5 files
+- All file paths must be relative to the project root
+- Do not include any markdown or formatting in your response
+- Output only valid JSON as shown in the schema
+- Ensure all JSON keys are properly quoted
+- Do not add any text before or after the JSON object"""
+    log_planning_complete('file_view', user_request)
+    return {'files_to_show': []}
+
+
+def _format_file_view_context(context_summary: Dict[str, Any]) ->str:
+    """Format context specifically for file viewing decisions."""
+    lines = []
+    if 'file_structure' in context_summary:
+        lines.append('FILE STRUCTURE:')
+        lines.append(json.dumps(context_summary['file_structure'], indent=2))
+    if 'key_files' in context_summary:
+        lines.append('\nKEY FILES WITH SNIPPETS:')
+        for file_path, snippet in context_summary['key_files'].items():
+            lines.append(f'\n--- {file_path} ---')
+            lines.append(snippet)
+    return '\n'.join(lines)
