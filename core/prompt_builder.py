@@ -10,25 +10,6 @@ like editing code or planning refactors, ensuring clarity and precision in model
 """
 
 
-def _format_context_summary(context_summary: Dict[str, Any]) ->str:
-    """Format the project context summary into a readable string for the prompt."""
-    formatted = []
-    if 'file_structure' in context_summary:
-        formatted.append('FILE STRUCTURE:')
-        formatted.append(json.dumps(context_summary['file_structure'],
-            indent=2))
-    if 'key_files' in context_summary:
-        formatted.append('\nKEY FILES WITH SNIPPETS:')
-        for file_path, snippet in context_summary['key_files'].items():
-            formatted.append(f'\n--- {file_path} ---')
-            formatted.append(snippet)
-    if 'project_info' in context_summary:
-        formatted.append('\nPROJECT INFO:')
-        for key, value in context_summary['project_info'].items():
-            formatted.append(f'{key}: {value}')
-    return '\n'.join(formatted)
-
-
 def build_refactor_goal_prompt(goal: str, context_summary: Dict[str, Any]
     ) ->str:
     """
